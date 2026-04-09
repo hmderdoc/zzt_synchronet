@@ -7,3 +7,4 @@ zzt_files/*/
 # Runtime-generated world high score files
 *.HI
 *.hi
+data/

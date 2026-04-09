@@ -35,6 +35,29 @@ If a world directory includes `.mp3` files, the web bridge can also use them for
 
 World/save file discovery is now extension-case-insensitive (for example `.zzt`, `.ZZT`, `.sav`, `.SAV`).
 
+### Where Sysops Can Get Worlds
+
+No built-in downloader is included. Sysops manually place files from world archives.
+
+Common sources:
+
+- Museum of ZZT (archive + mass downloads): `https://museumofzzt.com/file/mass-downloads/`
+- z2 (community portal; links to archives): `https://zzt.org/`
+- Internet Archive DOS ZZT software library: `https://archive.org/details/softwarelibrary_msdos_zzt`
+
+Placement examples:
+
+- Single world file:
+  - `/sbbs/xtrn/zzt_files/someworld.zzt`
+- World pack directory (recommended when `.TXT`, `.HI`, `.MP3` companion files exist):
+  - `/sbbs/xtrn/zzt/zzt_files/ana/ana.zzt`
+  - `/sbbs/xtrn/zzt/zzt_files/ana/*.txt|*.hi|*.mp3`
+
+The picker scans both:
+
+- `/sbbs/xtrn/zzt/zzt_files/...`
+- `/sbbs/xtrn/zzt_files/...`
+
 Save files are now user-scoped by default to avoid collisions between BBS users:
 
 - `/sbbs/xtrn/zzt/zzt_files/saves/<user-key>/*.SAV`

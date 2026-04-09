@@ -10082,6 +10082,9 @@ var ZZT;
             else if (key === "HIGH_SCORE_BBS" || key === "HIGHSCORE_BBS" || key === "BBS_NAME") {
                 ZZT.HighScoreBbsName = value;
             }
+            else if (key === "SERVER" && ZZT.HighScoreBbsName.length <= 0) {
+                ZZT.HighScoreBbsName = value;
+            }
             else if (key === "SAVE_ROOT" || key === "SAVES_ROOT") {
                 ZZT.SaveRootPath = value;
             }

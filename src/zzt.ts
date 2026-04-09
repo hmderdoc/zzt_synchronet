@@ -55,6 +55,8 @@ namespace ZZT {
         HighScoreJsonPath = value;
       } else if (key === "HIGH_SCORE_BBS" || key === "HIGHSCORE_BBS" || key === "BBS_NAME") {
         HighScoreBbsName = value;
+      } else if (key === "SERVER" && HighScoreBbsName.length <= 0) {
+        HighScoreBbsName = value;
       } else if (key === "SAVE_ROOT" || key === "SAVES_ROOT") {
         SaveRootPath = value;
       }
