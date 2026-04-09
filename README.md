@@ -35,7 +35,33 @@ If a world directory includes `.mp3` files, the web bridge can also use them for
 
 World/save file discovery is now extension-case-insensitive (for example `.zzt`, `.ZZT`, `.sav`, `.SAV`).
 
-High scores (`.HI`) are now loaded/saved for the active world and displayed from the title `H` command (matching the Pascal flow rather than using a static help page).
+Save files are now user-scoped by default to avoid collisions between BBS users:
+
+- `/sbbs/xtrn/zzt/zzt_files/saves/<user-key>/*.SAV`
+
+Legacy save locations are still scanned for compatibility.
+
+## High Scores (InterBBS JSON)
+
+High scores are now stored in a shared JSON service file keyed by world filename (`.zzt` id/path), with player and BBS identity:
+
+- default: `/sbbs/xtrn/zzt/data/highscores.json`
+
+Display lines now use `username @ bbs-name` instead of `-- You! --`.
+
+Classic world `.HI` files are still read as fallback and written as compatibility mirrors.
+
+### Optional `ZZT.INI` Overrides
+
+Create `/sbbs/xtrn/zzt/ZZT.INI` (or `zzt.ini`) to override defaults:
+
+```ini
+HIGH_SCORE_JSON=/path/to/shared/highscores.json
+HIGH_SCORE_BBS=My BBS Name
+SAVE_ROOT=/path/to/save/root
+```
+
+`HIGH_SCORE_JSON` can point to a shared path for inter-BBS score syncing.
 
 ## Help Resource Data (`ZZT.DAT`)
 

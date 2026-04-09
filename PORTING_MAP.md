@@ -15,6 +15,12 @@ Source root: `reconstruction-of-zzt-master/SRC`
 - `GAME.PAS` -> `src/game.ts` (board/world load/save, title/play loops, sidebar/UI, editor flows, transitions)
 - `EDITOR.PAS` -> integrated into `src/game.ts` editor routines (`EditorLoop` and related helpers), not split into a standalone module
 
+## BBS-Oriented Extensions (Beyond DOS Parity)
+
+- High scores are backed by JSON (`data/highscores.json`) keyed per world id, with `user @ bbs` identity display for inter-BBS play.
+- Save files (`.SAV`) are user-scoped under `zzt_files/saves/<user-key>/` to avoid collisions in multiuser doors.
+- Optional runtime overrides are read from `ZZT.INI` (`HIGH_SCORE_JSON`, `HIGH_SCORE_BBS`, `SAVE_ROOT`).
+
 ## Consolidation Notes
 
 - The TypeScript port is intentionally organized by runtime subsystem rather than a strict 1:1 file split with Pascal units.

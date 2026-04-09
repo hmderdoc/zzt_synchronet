@@ -5,6 +5,9 @@ declare var js: {
   global?: unknown;
 };
 declare var system: {
+  name?: string;
+  qwk_id?: string;
+  inet_addr?: string;
   text_dir?: string;
   exec_dir?: string;
   mods_dir?: string;
@@ -38,8 +41,15 @@ declare var console: {
 };
 
 declare var bbs: {
+  sys_status?: number;
   online?: boolean | number;
   hangup?: () => void;
+};
+
+declare var user: {
+  alias?: string;
+  name?: string;
+  number?: number;
 };
 
 declare function print(value?: unknown): void;

@@ -8,16 +8,38 @@ namespace ZZT {
   var WORLD_INFO_PADDING_LEN: number = 14;
   var HIGH_SCORE_NAME_MAX_LEN: number = 50;
   var HIGH_SCORE_ENTRY_BYTES: number = HIGH_SCORE_NAME_MAX_LEN + 3;
+  var HIGH_SCORE_JSON_VERSION: number = 1;
+  var DEFAULT_HIGH_SCORE_JSON_REL_PATH: string = "data/highscores.json";
+  var DEFAULT_SAVE_ROOT_REL_PATH: string = "zzt_files/saves";
+  var HIGH_SCORE_DISPLAY_NAME_MAX_LEN: number = 34;
 
   var TileBorder: Tile = createTile(E_NORMAL, 0x0e);
   var TileBoardEdge: Tile = createTile(E_BOARD_EDGE, 0x00);
   var ShowInputDebugOverlay: boolean = false;
   var NeighborDeltaX: number[] = [0, 0, -1, 1];
   var NeighborDeltaY: number[] = [-1, 1, 0, 0];
+  var ActiveHighScoreEntries: SharedHighScoreEntry[] = [];
 
   interface ByteCursor {
     bytes: number[];
     offset: number;
+  }
+
+  interface SharedHighScoreEntry {
+    player: string;
+    bbs: string;
+    score: number;
+    recordedAt: string;
+  }
+
+  interface SharedHighScoreWorldRecord {
+    updatedAt: string;
+    entries: SharedHighScoreEntry[];
+  }
+
+  interface SharedHighScoreStore {
+    version: number;
+    worlds: { [worldKey: string]: SharedHighScoreWorldRecord };
   }
 
   export interface Direction {
@@ -217,10 +239,239 @@ namespace ZZT {
     }
   }
 
+  function normalizeScoreText(value: string, maxLen: number): string {
+    var cleaned: string = String(value || "").replace(/[\x00-\x1f\x7f]/g, " ");
+    if (cleaned.length > maxLen) {
+      cleaned = cleaned.slice(0, maxLen);
+    }
+    return cleaned;
+  }
+
+  function trimSpaces(value: string): string {
+    return String(value || "").replace(/^\s+/, "").replace(/\s+$/, "");
+  }
+
+  function toSafePathPart(value: string, fallback: string): string {
+    var safe: string = String(value || "").toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
+    safe = safe.replace(/^-+/, "").replace(/-+$/, "");
+    if (safe.length <= 0) {
+      return fallback;
+    }
+    return safe;
+  }
+
+  function normalizePathCase(path: string): string {
+    return normalizeSlashes(path).toLowerCase();
+  }
+
+  function isAbsoluteFilePath(path: string): boolean {
+    var p: string = String(path || "");
+    if (p.length <= 0) {
+      return false;
+    }
+    if (p.charAt(0) === "/" || p.charAt(0) === "\\") {
+      return true;
+    }
+    return p.indexOf(":") >= 0;
+  }
+
+  function pathJoin(base: string, rel: string): string {
+    var b: string = String(base || "");
+    if (b.length > 0) {
+      var tail: string = b.charAt(b.length - 1);
+      if (tail !== "/" && tail !== "\\") {
+        b += "/";
+      }
+    }
+    return b + rel;
+  }
+
+  function pathDirname(path: string): string {
+    var normalized: string = normalizeSlashes(path);
+    var slashPos: number = normalized.lastIndexOf("/");
+    if (slashPos < 0) {
+      return "";
+    }
+    return normalized.slice(0, slashPos + 1);
+  }
+
+  function ensureDirectory(path: string): boolean {
+    if (path.length <= 0) {
+      return false;
+    }
+    if (typeof file_isdir === "function" && file_isdir(path)) {
+      return true;
+    }
+    if (typeof mkpath !== "function") {
+      return false;
+    }
+    try {
+      if (!!mkpath(path)) {
+        return true;
+      }
+    } catch (_err) {
+      // Ignore and continue with final check.
+    }
+    return typeof file_isdir === "function" && file_isdir(path);
+  }
+
+  function ensureParentDirectory(filePath: string): boolean {
+    var parent: string = pathDirname(filePath);
+    if (parent.length <= 0) {
+      return true;
+    }
+    return ensureDirectory(parent);
+  }
+
+  function currentIsoTimestamp(): string {
+    return new Date().toISOString();
+  }
+
+  function getCurrentUserName(): string {
+    if (typeof user !== "undefined") {
+      if (typeof user.alias === "string" && trimSpaces(user.alias).length > 0) {
+        return normalizeScoreText(trimSpaces(user.alias), HIGH_SCORE_NAME_MAX_LEN);
+      }
+      if (typeof user.name === "string" && trimSpaces(user.name).length > 0) {
+        return normalizeScoreText(trimSpaces(user.name), HIGH_SCORE_NAME_MAX_LEN);
+      }
+    }
+    return "Player";
+  }
+
+  function getCurrentBbsName(): string {
+    if (trimSpaces(HighScoreBbsName).length > 0) {
+      return normalizeScoreText(trimSpaces(HighScoreBbsName), HIGH_SCORE_NAME_MAX_LEN);
+    }
+    if (typeof system !== "undefined") {
+      if (typeof system.name === "string" && trimSpaces(system.name).length > 0) {
+        return normalizeScoreText(trimSpaces(system.name), HIGH_SCORE_NAME_MAX_LEN);
+      }
+      if (typeof system.qwk_id === "string" && trimSpaces(system.qwk_id).length > 0) {
+        return normalizeScoreText(trimSpaces(system.qwk_id), HIGH_SCORE_NAME_MAX_LEN);
+      }
+      if (typeof system.inet_addr === "string" && trimSpaces(system.inet_addr).length > 0) {
+        return normalizeScoreText(trimSpaces(system.inet_addr), HIGH_SCORE_NAME_MAX_LEN);
+      }
+    }
+    return "";
+  }
+
+  function buildHighScoreDisplayName(player: string, bbs: string): string {
+    var playerClean: string = normalizeScoreText(player, HIGH_SCORE_NAME_MAX_LEN);
+    var bbsClean: string = normalizeScoreText(bbs, HIGH_SCORE_NAME_MAX_LEN);
+    if (bbsClean.length > 0) {
+      return normalizeScoreText(playerClean + " @ " + bbsClean, HIGH_SCORE_NAME_MAX_LEN);
+    }
+    return playerClean;
+  }
+
+  function formatHighScoreDisplayName(entry: SharedHighScoreEntry): string {
+    var fullName: string = buildHighScoreDisplayName(entry.player, entry.bbs);
+    if (fullName.length > HIGH_SCORE_DISPLAY_NAME_MAX_LEN) {
+      return fullName.slice(0, HIGH_SCORE_DISPLAY_NAME_MAX_LEN);
+    }
+    return fullName;
+  }
+
+  function normalizeHighScoreEntry(entry: SharedHighScoreEntry): SharedHighScoreEntry | null {
+    var scoreValue: number = Math.floor(entry.score);
+    var playerName: string = normalizeScoreText(entry.player, HIGH_SCORE_NAME_MAX_LEN);
+    var bbsName: string = normalizeScoreText(entry.bbs, HIGH_SCORE_NAME_MAX_LEN);
+
+    if (playerName.length <= 0) {
+      playerName = "Player";
+    }
+    if (!isFinite(scoreValue) || scoreValue < 0) {
+      return null;
+    }
+
+    return {
+      player: playerName,
+      bbs: bbsName,
+      score: scoreValue,
+      recordedAt: trimSpaces(entry.recordedAt)
+    };
+  }
+
+  function setActiveHighScoreEntries(entries: SharedHighScoreEntry[]): void {
+    var normalized: SharedHighScoreEntry[] = [];
+    var i: number;
+    var candidate: SharedHighScoreEntry | null;
+
+    for (i = 0; i < entries.length; i += 1) {
+      candidate = normalizeHighScoreEntry(entries[i]);
+      if (candidate !== null) {
+        normalized.push(candidate);
+      }
+    }
+
+    normalized.sort(function (a: SharedHighScoreEntry, b: SharedHighScoreEntry): number {
+      if (a.score > b.score) {
+        return -1;
+      }
+      if (a.score < b.score) {
+        return 1;
+      }
+      if (upperCase(a.player) < upperCase(b.player)) {
+        return -1;
+      }
+      if (upperCase(a.player) > upperCase(b.player)) {
+        return 1;
+      }
+      return 0;
+    });
+
+    if (normalized.length > HIGH_SCORE_COUNT) {
+      normalized = normalized.slice(0, HIGH_SCORE_COUNT);
+    }
+
+    ActiveHighScoreEntries = normalized;
+    resetHighScoreList();
+    for (i = 0; i < normalized.length; i += 1) {
+      HighScoreList[i + 1].Score = normalized[i].score;
+      HighScoreList[i + 1].Name = formatHighScoreDisplayName(normalized[i]);
+    }
+  }
+
+  function getActiveHighScoreEntriesFromList(): SharedHighScoreEntry[] {
+    var entries: SharedHighScoreEntry[] = [];
+    var i: number;
+    var displayName: string;
+    var sepPos: number;
+    var player: string;
+    var bbs: string;
+
+    for (i = 1; i <= HIGH_SCORE_COUNT; i += 1) {
+      if (HighScoreList[i].Score < 0) {
+        continue;
+      }
+      displayName = normalizeScoreText(HighScoreList[i].Name, HIGH_SCORE_NAME_MAX_LEN);
+      sepPos = displayName.indexOf(" @ ");
+      if (sepPos > 0) {
+        player = displayName.slice(0, sepPos);
+        bbs = displayName.slice(sepPos + 3);
+      } else {
+        player = displayName;
+        bbs = "";
+      }
+
+      entries.push({
+        player: player,
+        bbs: bbs,
+        score: HighScoreList[i].Score,
+        recordedAt: ""
+      });
+    }
+
+    return entries;
+  }
+
   function parseHighScoreList(bytes: number[]): boolean {
     var i: number;
     var cursor: ByteCursor;
     var name: string;
+    var entries: SharedHighScoreEntry[] = [];
 
     if (bytes.length < (HIGH_SCORE_COUNT * HIGH_SCORE_ENTRY_BYTES)) {
       return false;
@@ -233,20 +484,35 @@ namespace ZZT {
 
     for (i = 1; i <= HIGH_SCORE_COUNT; i += 1) {
       name = readPascalString(cursor, HIGH_SCORE_NAME_MAX_LEN);
-      HighScoreList[i].Name = name;
-      HighScoreList[i].Score = readInt16(cursor);
+      entries.push({
+        player: normalizeScoreText(name, HIGH_SCORE_NAME_MAX_LEN),
+        bbs: "",
+        score: readInt16(cursor),
+        recordedAt: ""
+      });
     }
 
+    setActiveHighScoreEntries(entries);
     return true;
   }
 
   function serializeHighScoreList(): number[] {
     var out: number[] = [];
     var i: number;
+    var entries: SharedHighScoreEntry[] = ActiveHighScoreEntries;
+
+    if (entries.length <= 0) {
+      entries = getActiveHighScoreEntriesFromList();
+    }
 
     for (i = 1; i <= HIGH_SCORE_COUNT; i += 1) {
-      writePascalString(out, HighScoreList[i].Name, HIGH_SCORE_NAME_MAX_LEN);
-      pushInt16(out, HighScoreList[i].Score);
+      if (i - 1 < entries.length) {
+        writePascalString(out, formatHighScoreDisplayName(entries[i - 1]), HIGH_SCORE_NAME_MAX_LEN);
+        pushInt16(out, entries[i - 1].score);
+      } else {
+        writePascalString(out, "", HIGH_SCORE_NAME_MAX_LEN);
+        pushInt16(out, -1);
+      }
     }
 
     return out;
@@ -265,11 +531,203 @@ namespace ZZT {
     paths.push(path);
   }
 
+  function getCurrentScoreWorldKey(): string {
+    var worldId: string = LoadedGameFileName;
+    var worldExt: string = ".ZZT";
+
+    if (worldId.length <= 0 && World.Info.Name.length > 0) {
+      worldId = World.Info.Name;
+    }
+    if (worldId.length <= 0) {
+      worldId = "ZZT";
+    }
+
+    if (upperCase(worldId.slice(worldId.length - 4)) === ".SAV") {
+      worldId = World.Info.Name;
+      worldExt = ".ZZT";
+    }
+
+    if (worldId.length <= 0) {
+      worldId = "ZZT";
+    }
+
+    worldId = toWorldIdentifier(worldId, worldExt);
+    worldId = stripExtension(worldId, ".ZZT");
+    worldId = stripExtension(worldId, ".zzt");
+    worldId = normalizePathCase(worldId);
+    if (worldId.length <= 0) {
+      worldId = "zzt";
+    }
+    return worldId;
+  }
+
+  function resolveHighScoreJsonPath(): string {
+    var configured: string = trimSpaces(HighScoreJsonPath);
+    if (configured.length <= 0) {
+      return execPath(DEFAULT_HIGH_SCORE_JSON_REL_PATH);
+    }
+    if (isAbsoluteFilePath(configured)) {
+      return configured;
+    }
+    return execPath(configured);
+  }
+
+  function readSharedHighScoreStore(): SharedHighScoreStore {
+    var path: string = resolveHighScoreJsonPath();
+    var bytes: number[] | null = runtime.readBinaryFile(path);
+    var emptyStore: SharedHighScoreStore = {
+      version: HIGH_SCORE_JSON_VERSION,
+      worlds: {}
+    };
+    var text: string;
+    var parsed: unknown;
+    var parsedObj: { version?: unknown; worlds?: unknown };
+    var worldsObj: { [key: string]: unknown };
+    var worldKey: string;
+    var worldValue: { updatedAt?: unknown; entries?: unknown };
+    var rawEntries: unknown[];
+    var entry: { player?: unknown; bbs?: unknown; score?: unknown; recordedAt?: unknown };
+    var normalizedEntries: SharedHighScoreEntry[];
+    var i: number;
+    var normalizedWorldKey: string;
+
+    if (bytes === null || bytes.length <= 0) {
+      return emptyStore;
+    }
+
+    text = trimSpaces(bytesToString(bytes));
+    if (text.length <= 0) {
+      return emptyStore;
+    }
+
+    try {
+      parsed = JSON.parse(text);
+    } catch (_err) {
+      return emptyStore;
+    }
+
+    if (typeof parsed !== "object" || parsed === null) {
+      return emptyStore;
+    }
+    parsedObj = parsed as { version?: unknown; worlds?: unknown };
+    if (typeof parsedObj.worlds !== "object" || parsedObj.worlds === null) {
+      return emptyStore;
+    }
+
+    worldsObj = parsedObj.worlds as { [key: string]: unknown };
+    for (worldKey in worldsObj) {
+      if (!Object.prototype.hasOwnProperty.call(worldsObj, worldKey)) {
+        continue;
+      }
+
+      worldValue = worldsObj[worldKey] as { updatedAt?: unknown; entries?: unknown };
+      if (typeof worldValue !== "object" || worldValue === null) {
+        continue;
+      }
+      if (!Array.isArray(worldValue.entries)) {
+        continue;
+      }
+
+      rawEntries = worldValue.entries as unknown[];
+      normalizedEntries = [];
+      for (i = 0; i < rawEntries.length; i += 1) {
+        entry = rawEntries[i] as { player?: unknown; bbs?: unknown; score?: unknown; recordedAt?: unknown };
+        if (typeof entry !== "object" || entry === null) {
+          continue;
+        }
+        normalizedEntries.push({
+          player: typeof entry.player === "string" ? entry.player : "",
+          bbs: typeof entry.bbs === "string" ? entry.bbs : "",
+          score: typeof entry.score === "number" ? entry.score : -1,
+          recordedAt: typeof entry.recordedAt === "string" ? entry.recordedAt : ""
+        });
+      }
+
+      normalizedWorldKey = normalizePathCase(worldKey);
+      emptyStore.worlds[normalizedWorldKey] = {
+        updatedAt: typeof worldValue.updatedAt === "string" ? worldValue.updatedAt : "",
+        entries: normalizedEntries
+      };
+    }
+
+    return emptyStore;
+  }
+
+  function writeSharedHighScoreStore(store: SharedHighScoreStore): boolean {
+    var path: string = resolveHighScoreJsonPath();
+    var payload: string = JSON.stringify(store, null, 2) + "\n";
+
+    if (!ensureParentDirectory(path)) {
+      return false;
+    }
+    return runtime.writeBinaryFile(path, stringToBytes(payload));
+  }
+
+  function resolveSaveRootPath(): string {
+    var configured: string = trimSpaces(SaveRootPath);
+    if (configured.length <= 0) {
+      return execPath(DEFAULT_SAVE_ROOT_REL_PATH);
+    }
+    if (isAbsoluteFilePath(configured)) {
+      return configured;
+    }
+    return execPath(configured);
+  }
+
+  function currentUserSaveKey(): string {
+    var userNumber: string = "";
+    var userName: string = getCurrentUserName();
+
+    if (typeof user !== "undefined" &&
+        typeof user.number === "number" &&
+        isFinite(user.number) &&
+        user.number > 0) {
+      userNumber = String(Math.floor(user.number));
+    }
+
+    if (userNumber.length > 0) {
+      return "u" + toSafePathPart(userNumber + "-" + userName, "user");
+    }
+    return "u" + toSafePathPart(userName, "user");
+  }
+
+  function currentUserSaveDir(): string {
+    return pathJoin(resolveSaveRootPath(), currentUserSaveKey() + "/");
+  }
+
+  export function BuildDefaultSaveFileName(): string {
+    var base: string;
+    var value: string;
+
+    if (typeof user !== "undefined" &&
+        typeof user.number === "number" &&
+        isFinite(user.number) &&
+        user.number > 0) {
+      return ("S" + String(Math.floor(user.number))).slice(0, 8);
+    }
+
+    base = getCurrentUserName().toUpperCase().replace(/[^A-Z0-9]+/g, "");
+    if (base.length <= 0) {
+      return "SAVED";
+    }
+
+    value = "S" + base;
+    if (value.length > 8) {
+      value = value.slice(0, 8);
+    }
+    return value;
+  }
+
   function getHighScorePathCandidates(): string[] {
     var paths: string[] = [];
     var baseName: string = LoadedGameFileName.length > 0 ? LoadedGameFileName : World.Info.Name;
     var hasPathSep: boolean =
       baseName.indexOf("/") >= 0 || baseName.indexOf("\\") >= 0;
+
+    if (upperCase(baseName.slice(baseName.length - 4)) === ".SAV" && World.Info.Name.length > 0) {
+      baseName = World.Info.Name;
+      hasPathSep = false;
+    }
 
     function addHiVariants(pathBase: string): void {
       pushUniquePath(paths, pathBase + ".HI");
@@ -690,9 +1148,8 @@ namespace ZZT {
     var resFallback: string;
     var hasPathSep: boolean =
       filename.indexOf("/") >= 0 || filename.indexOf("\\") >= 0;
-    var isAbsolutePath: boolean =
-      (filename.length > 0 && (filename.charAt(0) === "/" || filename.charAt(0) === "\\")) ||
-      filename.indexOf(":") >= 0;
+    var isAbsolutePath: boolean = isAbsoluteFilePath(filename);
+    var savePath: string;
 
     if (hasPathSep || isAbsolutePath) {
       if (isAbsolutePath) {
@@ -717,6 +1174,26 @@ namespace ZZT {
       }
 
       return execPath(fullName);
+    }
+
+    if (upperCase(extension) === ".SAV") {
+      for (i = 0; i < fullNames.length; i += 1) {
+        savePath = pathJoin(currentUserSaveDir(), fullNames[i]);
+        if (fileExists(savePath)) {
+          return savePath;
+        }
+
+        zztFilesPrimary = execPath("zzt_files/" + fullNames[i]);
+        if (fileExists(zztFilesPrimary)) {
+          return zztFilesPrimary;
+        }
+
+        primary = execPath(fullNames[i]);
+        if (fileExists(primary)) {
+          return primary;
+        }
+      }
+      return pathJoin(currentUserSaveDir(), fullName);
     }
 
     for (i = 0; i < fullNames.length; i += 1) {
@@ -1037,6 +1514,11 @@ namespace ZZT {
       World.BoardLen[boardId] = boardData.length;
       pushUInt16(fileBytes, boardData.length);
       appendBytes(fileBytes, boardData);
+    }
+
+    if (!ensureParentDirectory(path)) {
+      BoardOpen(currentBoardId);
+      return false;
     }
 
     var result: boolean = runtime.writeBinaryFile(path, fileBytes);
@@ -1416,23 +1898,59 @@ namespace ZZT {
   }
 
   export function HighScoresLoad(): void {
+    var worldKey: string = getCurrentScoreWorldKey();
+    var store: SharedHighScoreStore = readSharedHighScoreStore();
+    var record: SharedHighScoreWorldRecord | undefined = store.worlds[worldKey];
     var paths: string[] = getHighScorePathCandidates();
     var i: number;
     var bytes: number[] | null;
 
+    ActiveHighScoreEntries = [];
     resetHighScoreList();
+
+    if (typeof record !== "undefined") {
+      setActiveHighScoreEntries(record.entries);
+      if (ActiveHighScoreEntries.length > 0) {
+        return;
+      }
+    }
 
     for (i = 0; i < paths.length; i += 1) {
       bytes = runtime.readBinaryFile(paths[i]);
       if (bytes !== null && parseHighScoreList(bytes)) {
+        if (ActiveHighScoreEntries.length > 0) {
+          HighScoresSave();
+        }
         return;
       }
     }
   }
 
   export function HighScoresSave(): void {
+    var worldKey: string = getCurrentScoreWorldKey();
+    var store: SharedHighScoreStore = readSharedHighScoreStore();
+    var entries: SharedHighScoreEntry[] =
+      ActiveHighScoreEntries.length > 0 ? ActiveHighScoreEntries.slice(0) : getActiveHighScoreEntriesFromList();
     var paths: string[] = getHighScorePathCandidates();
     var targetPath: string = paths.length > 0 ? paths[0] : execPath("ZZT.HI");
+
+    if (entries.length > HIGH_SCORE_COUNT) {
+      entries = entries.slice(0, HIGH_SCORE_COUNT);
+    }
+    setActiveHighScoreEntries(entries);
+    entries = ActiveHighScoreEntries.slice(0);
+
+    if (entries.length > 0) {
+      store.worlds[worldKey] = {
+        updatedAt: currentIsoTimestamp(),
+        entries: entries
+      };
+    } else if (typeof store.worlds[worldKey] !== "undefined") {
+      delete store.worlds[worldKey];
+    }
+
+    writeSharedHighScoreStore(store);
+    ensureParentDirectory(targetPath);
     runtime.writeBinaryFile(targetPath, serializeHighScoreList());
   }
 
@@ -1449,7 +1967,7 @@ namespace ZZT {
       if (HighScoreList[i].Score >= 0) {
         displayName = HighScoreList[i].Name;
         if (displayName.length <= 0) {
-          displayName = "-- You! --";
+          displayName = "Unknown Player";
         }
         scoreStr = padLeft(String(HighScoreList[i].Score), 5);
         TextWindowAppend(state, scoreStr + "  " + displayName);
@@ -1478,7 +1996,7 @@ namespace ZZT {
     }
 
     if (state.LineCount > 2) {
-      state.Title = "High scores for " + World.Info.Name;
+      state.Title = "High scores for " + (World.Info.Name.length > 0 ? World.Info.Name : splitBaseName(getCurrentScoreWorldKey()));
       TextWindowDrawOpen(state);
       TextWindowSelect(state, false, true);
       TextWindowDrawClose(state);
@@ -1488,9 +2006,10 @@ namespace ZZT {
   }
 
   export function HighScoresAdd(score: number): void {
-    var listPos: number = 1;
-    var i: number;
-    var name: string;
+    var entries: SharedHighScoreEntry[] = ActiveHighScoreEntries.slice(0);
+    var listPos: number = 0;
+    var entry: SharedHighScoreEntry;
+    var boardTitle: string = World.Info.Name.length > 0 ? World.Info.Name : splitBaseName(getCurrentScoreWorldKey());
     var textWindow: TextWindowState = {
       Selectable: false,
       LineCount: 0,
@@ -1502,34 +2021,32 @@ namespace ZZT {
       ScreenCopy: []
     };
 
-    while (listPos <= HIGH_SCORE_COUNT && score < HighScoreList[listPos].Score) {
+    while (listPos < entries.length && score < entries[listPos].score) {
       listPos += 1;
     }
 
-    if (listPos > HIGH_SCORE_COUNT || score <= 0) {
+    if (listPos >= HIGH_SCORE_COUNT || score <= 0) {
       return;
     }
 
-    for (i = HIGH_SCORE_COUNT - 1; i >= listPos; i -= 1) {
-      HighScoreList[i + 1].Name = HighScoreList[i].Name;
-      HighScoreList[i + 1].Score = HighScoreList[i].Score;
+    entry = {
+      player: getCurrentUserName(),
+      bbs: getCurrentBbsName(),
+      score: score,
+      recordedAt: currentIsoTimestamp()
+    };
+    entries.splice(listPos, 0, entry);
+    if (entries.length > HIGH_SCORE_COUNT) {
+      entries = entries.slice(0, HIGH_SCORE_COUNT);
     }
-    HighScoreList[listPos].Score = score;
-    HighScoreList[listPos].Name = "-- You! --";
-
-    highScoresInitTextWindow(textWindow);
-    textWindow.LinePos = listPos;
-    textWindow.Title = "New high score for " + World.Info.Name;
-    TextWindowDrawOpen(textWindow);
-    TextWindowDraw(textWindow, false, false);
-
-    name = PopupPromptString("Congratulations!  Enter your name:", "");
-    if (name.length <= 0) {
-      name = "-- You! --";
-    }
-    HighScoreList[listPos].Name = name;
+    setActiveHighScoreEntries(entries);
     HighScoresSave();
 
+    highScoresInitTextWindow(textWindow);
+    textWindow.LinePos = listPos + 1;
+    textWindow.Title = "New high score for " + boardTitle;
+    TextWindowDrawOpen(textWindow);
+    TextWindowSelect(textWindow, false, false);
     TextWindowDrawClose(textWindow);
     TransitionDrawToBoard();
     TextWindowFree(textWindow);
@@ -3015,7 +3532,7 @@ namespace ZZT {
     var markerPos: number = normalizedUpper.indexOf(marker);
     var relativeWithExt: string;
 
-    if (markerPos >= 0) {
+    if (upperCase(extension) === ".ZZT" && markerPos >= 0) {
       relativeWithExt = normalized.slice(markerPos);
       return stripExtension(relativeWithExt, extension);
     }
@@ -3026,39 +3543,44 @@ namespace ZZT {
   function listFilesByExtension(extension: string): string[] {
     var files: string[] = [];
     var listed: string[] = [];
-    var listedSharedTopLevel: string[] = [];
-    var listedSharedNested: string[] = [];
-    var listedRoot: string[] = [];
-    var listedLegacyRes: string[] = [];
-    var listedTopLevelPacks: string[] = [];
-    var listedNestedPacks: string[] = [];
+    var listedPrimary: string[] = [];
+    var listedSecondary: string[] = [];
+    var listedTertiary: string[] = [];
+    var listedLegacy: string[] = [];
     var i: number;
     var entryName: string;
     var upperExt: string = upperCase(extension);
     var seen: { [id: string]: boolean } = {};
+    var rawName: string;
 
     if (typeof directory !== "function") {
       return files;
     }
 
-    // Preferred world drop location: /xtrn/zzt/zzt_files (+ one subdirectory level for packs).
-    listedTopLevelPacks = directory(execPath("zzt_files/*"));
-    listedNestedPacks = directory(execPath("zzt_files/*/*"));
+    if (upperExt === ".SAV") {
+      listedPrimary = directory(pathJoin(currentUserSaveDir(), "*"));
+      listedSecondary = directory(execPath("zzt_files/*"));
+      listedTertiary = directory(execPath("*"));
+      listed = listed.concat(listedPrimary);
+      listed = listed.concat(listedSecondary);
+      listed = listed.concat(listedTertiary);
+    } else {
+      // Preferred world drop location: /xtrn/zzt/zzt_files (+ one subdirectory level for packs).
+      listedPrimary = directory(execPath("zzt_files/*"));
+      listedSecondary = directory(execPath("zzt_files/*/*"));
 
-    // Shared location: /xtrn/zzt_files (+ one subdirectory level for packs).
-    listedSharedTopLevel = directory(execPath("../zzt_files/*"));
-    listedSharedNested = directory(execPath("../zzt_files/*/*"));
+      // Shared location: /xtrn/zzt_files (+ one subdirectory level for packs).
+      listedTertiary = directory(execPath("../zzt_files/*"));
+      listedLegacy = directory(execPath("../zzt_files/*/*"));
 
-    // Legacy fallback locations kept for compatibility.
-    listedRoot = directory(execPath("*"));
-    listedLegacyRes = directory(execPath("reconstruction-of-zzt-master/RES/*"));
-
-    listed = listed.concat(listedTopLevelPacks);
-    listed = listed.concat(listedNestedPacks);
-    listed = listed.concat(listedSharedTopLevel);
-    listed = listed.concat(listedSharedNested);
-    listed = listed.concat(listedRoot);
-    listed = listed.concat(listedLegacyRes);
+      // Legacy fallback locations kept for compatibility.
+      listed = listed.concat(listedPrimary);
+      listed = listed.concat(listedSecondary);
+      listed = listed.concat(listedTertiary);
+      listed = listed.concat(listedLegacy);
+      listed = listed.concat(directory(execPath("*")));
+      listed = listed.concat(directory(execPath("reconstruction-of-zzt-master/RES/*")));
+    }
 
     for (i = 0; i < listed.length; i += 1) {
       if (typeof file_isdir === "function" && file_isdir(listed[i])) {
@@ -3071,7 +3593,7 @@ namespace ZZT {
       }
 
       if (upperExt.length > 0) {
-        var rawName: string = listed[i];
+        rawName = listed[i];
         if (upperCase(rawName.slice(rawName.length - upperExt.length)) !== upperExt) {
           continue;
         }
@@ -3085,6 +3607,16 @@ namespace ZZT {
     }
 
     files.sort(function (a: string, b: string): number {
+      if (upperExt === ".SAV") {
+        if (upperCase(a) < upperCase(b)) {
+          return -1;
+        }
+        if (upperCase(a) > upperCase(b)) {
+          return 1;
+        }
+        return 0;
+      }
+
       var aUpper: string = upperCase(a);
       var bUpper: string = upperCase(b);
       var aPreferred: boolean = aUpper.indexOf("ZZT_FILES/") === 0;

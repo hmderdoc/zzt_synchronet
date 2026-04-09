@@ -598,6 +598,9 @@ var ZZT;
     ZZT.JustStarted = false;
     ZZT.ConfigRegistration = "";
     ZZT.ConfigWorldFile = "";
+    ZZT.HighScoreJsonPath = "";
+    ZZT.HighScoreBbsName = "";
+    ZZT.SaveRootPath = "";
     ZZT.GameVersion = "3.2";
     ZZT.HighScoreList = createHighScoreList();
     ZZT.ResourceDataFileName = "ZZT.DAT";
@@ -5916,11 +5919,16 @@ var ZZT;
     var WORLD_INFO_PADDING_LEN = 14;
     var HIGH_SCORE_NAME_MAX_LEN = 50;
     var HIGH_SCORE_ENTRY_BYTES = HIGH_SCORE_NAME_MAX_LEN + 3;
+    var HIGH_SCORE_JSON_VERSION = 1;
+    var DEFAULT_HIGH_SCORE_JSON_REL_PATH = "data/highscores.json";
+    var DEFAULT_SAVE_ROOT_REL_PATH = "zzt_files/saves";
+    var HIGH_SCORE_DISPLAY_NAME_MAX_LEN = 34;
     var TileBorder = ZZT.createTile(ZZT.E_NORMAL, 0x0e);
     var TileBoardEdge = ZZT.createTile(ZZT.E_BOARD_EDGE, 0x00);
     var ShowInputDebugOverlay = false;
     var NeighborDeltaX = [0, 0, -1, 1];
     var NeighborDeltaY = [-1, 1, 0, 0];
+    var ActiveHighScoreEntries = [];
     function randomInt(maxExclusive) {
         if (maxExclusive <= 0) {
             return 0;
@@ -6078,10 +6086,215 @@ var ZZT;
             ZZT.HighScoreList[i].Score = -1;
         }
     }
+    function normalizeScoreText(value, maxLen) {
+        var cleaned = String(value || "").replace(/[\x00-\x1f\x7f]/g, " ");
+        if (cleaned.length > maxLen) {
+            cleaned = cleaned.slice(0, maxLen);
+        }
+        return cleaned;
+    }
+    function trimSpaces(value) {
+        return String(value || "").replace(/^\s+/, "").replace(/\s+$/, "");
+    }
+    function toSafePathPart(value, fallback) {
+        var safe = String(value || "").toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
+        safe = safe.replace(/^-+/, "").replace(/-+$/, "");
+        if (safe.length <= 0) {
+            return fallback;
+        }
+        return safe;
+    }
+    function normalizePathCase(path) {
+        return normalizeSlashes(path).toLowerCase();
+    }
+    function isAbsoluteFilePath(path) {
+        var p = String(path || "");
+        if (p.length <= 0) {
+            return false;
+        }
+        if (p.charAt(0) === "/" || p.charAt(0) === "\\") {
+            return true;
+        }
+        return p.indexOf(":") >= 0;
+    }
+    function pathJoin(base, rel) {
+        var b = String(base || "");
+        if (b.length > 0) {
+            var tail = b.charAt(b.length - 1);
+            if (tail !== "/" && tail !== "\\") {
+                b += "/";
+            }
+        }
+        return b + rel;
+    }
+    function pathDirname(path) {
+        var normalized = normalizeSlashes(path);
+        var slashPos = normalized.lastIndexOf("/");
+        if (slashPos < 0) {
+            return "";
+        }
+        return normalized.slice(0, slashPos + 1);
+    }
+    function ensureDirectory(path) {
+        if (path.length <= 0) {
+            return false;
+        }
+        if (typeof file_isdir === "function" && file_isdir(path)) {
+            return true;
+        }
+        if (typeof mkpath !== "function") {
+            return false;
+        }
+        try {
+            if (!!mkpath(path)) {
+                return true;
+            }
+        }
+        catch (_err) {
+            // Ignore and continue with final check.
+        }
+        return typeof file_isdir === "function" && file_isdir(path);
+    }
+    function ensureParentDirectory(filePath) {
+        var parent = pathDirname(filePath);
+        if (parent.length <= 0) {
+            return true;
+        }
+        return ensureDirectory(parent);
+    }
+    function currentIsoTimestamp() {
+        return new Date().toISOString();
+    }
+    function getCurrentUserName() {
+        if (typeof user !== "undefined") {
+            if (typeof user.alias === "string" && trimSpaces(user.alias).length > 0) {
+                return normalizeScoreText(trimSpaces(user.alias), HIGH_SCORE_NAME_MAX_LEN);
+            }
+            if (typeof user.name === "string" && trimSpaces(user.name).length > 0) {
+                return normalizeScoreText(trimSpaces(user.name), HIGH_SCORE_NAME_MAX_LEN);
+            }
+        }
+        return "Player";
+    }
+    function getCurrentBbsName() {
+        if (trimSpaces(ZZT.HighScoreBbsName).length > 0) {
+            return normalizeScoreText(trimSpaces(ZZT.HighScoreBbsName), HIGH_SCORE_NAME_MAX_LEN);
+        }
+        if (typeof system !== "undefined") {
+            if (typeof system.name === "string" && trimSpaces(system.name).length > 0) {
+                return normalizeScoreText(trimSpaces(system.name), HIGH_SCORE_NAME_MAX_LEN);
+            }
+            if (typeof system.qwk_id === "string" && trimSpaces(system.qwk_id).length > 0) {
+                return normalizeScoreText(trimSpaces(system.qwk_id), HIGH_SCORE_NAME_MAX_LEN);
+            }
+            if (typeof system.inet_addr === "string" && trimSpaces(system.inet_addr).length > 0) {
+                return normalizeScoreText(trimSpaces(system.inet_addr), HIGH_SCORE_NAME_MAX_LEN);
+            }
+        }
+        return "";
+    }
+    function buildHighScoreDisplayName(player, bbs) {
+        var playerClean = normalizeScoreText(player, HIGH_SCORE_NAME_MAX_LEN);
+        var bbsClean = normalizeScoreText(bbs, HIGH_SCORE_NAME_MAX_LEN);
+        if (bbsClean.length > 0) {
+            return normalizeScoreText(playerClean + " @ " + bbsClean, HIGH_SCORE_NAME_MAX_LEN);
+        }
+        return playerClean;
+    }
+    function formatHighScoreDisplayName(entry) {
+        var fullName = buildHighScoreDisplayName(entry.player, entry.bbs);
+        if (fullName.length > HIGH_SCORE_DISPLAY_NAME_MAX_LEN) {
+            return fullName.slice(0, HIGH_SCORE_DISPLAY_NAME_MAX_LEN);
+        }
+        return fullName;
+    }
+    function normalizeHighScoreEntry(entry) {
+        var scoreValue = Math.floor(entry.score);
+        var playerName = normalizeScoreText(entry.player, HIGH_SCORE_NAME_MAX_LEN);
+        var bbsName = normalizeScoreText(entry.bbs, HIGH_SCORE_NAME_MAX_LEN);
+        if (playerName.length <= 0) {
+            playerName = "Player";
+        }
+        if (!isFinite(scoreValue) || scoreValue < 0) {
+            return null;
+        }
+        return {
+            player: playerName,
+            bbs: bbsName,
+            score: scoreValue,
+            recordedAt: trimSpaces(entry.recordedAt)
+        };
+    }
+    function setActiveHighScoreEntries(entries) {
+        var normalized = [];
+        var i;
+        var candidate;
+        for (i = 0; i < entries.length; i += 1) {
+            candidate = normalizeHighScoreEntry(entries[i]);
+            if (candidate !== null) {
+                normalized.push(candidate);
+            }
+        }
+        normalized.sort(function (a, b) {
+            if (a.score > b.score) {
+                return -1;
+            }
+            if (a.score < b.score) {
+                return 1;
+            }
+            if (upperCase(a.player) < upperCase(b.player)) {
+                return -1;
+            }
+            if (upperCase(a.player) > upperCase(b.player)) {
+                return 1;
+            }
+            return 0;
+        });
+        if (normalized.length > ZZT.HIGH_SCORE_COUNT) {
+            normalized = normalized.slice(0, ZZT.HIGH_SCORE_COUNT);
+        }
+        ActiveHighScoreEntries = normalized;
+        resetHighScoreList();
+        for (i = 0; i < normalized.length; i += 1) {
+            ZZT.HighScoreList[i + 1].Score = normalized[i].score;
+            ZZT.HighScoreList[i + 1].Name = formatHighScoreDisplayName(normalized[i]);
+        }
+    }
+    function getActiveHighScoreEntriesFromList() {
+        var entries = [];
+        var i;
+        var displayName;
+        var sepPos;
+        var player;
+        var bbs;
+        for (i = 1; i <= ZZT.HIGH_SCORE_COUNT; i += 1) {
+            if (ZZT.HighScoreList[i].Score < 0) {
+                continue;
+            }
+            displayName = normalizeScoreText(ZZT.HighScoreList[i].Name, HIGH_SCORE_NAME_MAX_LEN);
+            sepPos = displayName.indexOf(" @ ");
+            if (sepPos > 0) {
+                player = displayName.slice(0, sepPos);
+                bbs = displayName.slice(sepPos + 3);
+            }
+            else {
+                player = displayName;
+                bbs = "";
+            }
+            entries.push({
+                player: player,
+                bbs: bbs,
+                score: ZZT.HighScoreList[i].Score,
+                recordedAt: ""
+            });
+        }
+        return entries;
+    }
     function parseHighScoreList(bytes) {
         var i;
         var cursor;
         var name;
+        var entries = [];
         if (bytes.length < (ZZT.HIGH_SCORE_COUNT * HIGH_SCORE_ENTRY_BYTES)) {
             return false;
         }
@@ -6091,17 +6304,32 @@ var ZZT;
         };
         for (i = 1; i <= ZZT.HIGH_SCORE_COUNT; i += 1) {
             name = readPascalString(cursor, HIGH_SCORE_NAME_MAX_LEN);
-            ZZT.HighScoreList[i].Name = name;
-            ZZT.HighScoreList[i].Score = readInt16(cursor);
+            entries.push({
+                player: normalizeScoreText(name, HIGH_SCORE_NAME_MAX_LEN),
+                bbs: "",
+                score: readInt16(cursor),
+                recordedAt: ""
+            });
         }
+        setActiveHighScoreEntries(entries);
         return true;
     }
     function serializeHighScoreList() {
         var out = [];
         var i;
+        var entries = ActiveHighScoreEntries;
+        if (entries.length <= 0) {
+            entries = getActiveHighScoreEntriesFromList();
+        }
         for (i = 1; i <= ZZT.HIGH_SCORE_COUNT; i += 1) {
-            writePascalString(out, ZZT.HighScoreList[i].Name, HIGH_SCORE_NAME_MAX_LEN);
-            pushInt16(out, ZZT.HighScoreList[i].Score);
+            if (i - 1 < entries.length) {
+                writePascalString(out, formatHighScoreDisplayName(entries[i - 1]), HIGH_SCORE_NAME_MAX_LEN);
+                pushInt16(out, entries[i - 1].score);
+            }
+            else {
+                writePascalString(out, "", HIGH_SCORE_NAME_MAX_LEN);
+                pushInt16(out, -1);
+            }
         }
         return out;
     }
@@ -6117,10 +6345,176 @@ var ZZT;
         }
         paths.push(path);
     }
+    function getCurrentScoreWorldKey() {
+        var worldId = ZZT.LoadedGameFileName;
+        var worldExt = ".ZZT";
+        if (worldId.length <= 0 && ZZT.World.Info.Name.length > 0) {
+            worldId = ZZT.World.Info.Name;
+        }
+        if (worldId.length <= 0) {
+            worldId = "ZZT";
+        }
+        if (upperCase(worldId.slice(worldId.length - 4)) === ".SAV") {
+            worldId = ZZT.World.Info.Name;
+            worldExt = ".ZZT";
+        }
+        if (worldId.length <= 0) {
+            worldId = "ZZT";
+        }
+        worldId = toWorldIdentifier(worldId, worldExt);
+        worldId = stripExtension(worldId, ".ZZT");
+        worldId = stripExtension(worldId, ".zzt");
+        worldId = normalizePathCase(worldId);
+        if (worldId.length <= 0) {
+            worldId = "zzt";
+        }
+        return worldId;
+    }
+    function resolveHighScoreJsonPath() {
+        var configured = trimSpaces(ZZT.HighScoreJsonPath);
+        if (configured.length <= 0) {
+            return ZZT.execPath(DEFAULT_HIGH_SCORE_JSON_REL_PATH);
+        }
+        if (isAbsoluteFilePath(configured)) {
+            return configured;
+        }
+        return ZZT.execPath(configured);
+    }
+    function readSharedHighScoreStore() {
+        var path = resolveHighScoreJsonPath();
+        var bytes = ZZT.runtime.readBinaryFile(path);
+        var emptyStore = {
+            version: HIGH_SCORE_JSON_VERSION,
+            worlds: {}
+        };
+        var text;
+        var parsed;
+        var parsedObj;
+        var worldsObj;
+        var worldKey;
+        var worldValue;
+        var rawEntries;
+        var entry;
+        var normalizedEntries;
+        var i;
+        var normalizedWorldKey;
+        if (bytes === null || bytes.length <= 0) {
+            return emptyStore;
+        }
+        text = trimSpaces(bytesToString(bytes));
+        if (text.length <= 0) {
+            return emptyStore;
+        }
+        try {
+            parsed = JSON.parse(text);
+        }
+        catch (_err) {
+            return emptyStore;
+        }
+        if (typeof parsed !== "object" || parsed === null) {
+            return emptyStore;
+        }
+        parsedObj = parsed;
+        if (typeof parsedObj.worlds !== "object" || parsedObj.worlds === null) {
+            return emptyStore;
+        }
+        worldsObj = parsedObj.worlds;
+        for (worldKey in worldsObj) {
+            if (!Object.prototype.hasOwnProperty.call(worldsObj, worldKey)) {
+                continue;
+            }
+            worldValue = worldsObj[worldKey];
+            if (typeof worldValue !== "object" || worldValue === null) {
+                continue;
+            }
+            if (!Array.isArray(worldValue.entries)) {
+                continue;
+            }
+            rawEntries = worldValue.entries;
+            normalizedEntries = [];
+            for (i = 0; i < rawEntries.length; i += 1) {
+                entry = rawEntries[i];
+                if (typeof entry !== "object" || entry === null) {
+                    continue;
+                }
+                normalizedEntries.push({
+                    player: typeof entry.player === "string" ? entry.player : "",
+                    bbs: typeof entry.bbs === "string" ? entry.bbs : "",
+                    score: typeof entry.score === "number" ? entry.score : -1,
+                    recordedAt: typeof entry.recordedAt === "string" ? entry.recordedAt : ""
+                });
+            }
+            normalizedWorldKey = normalizePathCase(worldKey);
+            emptyStore.worlds[normalizedWorldKey] = {
+                updatedAt: typeof worldValue.updatedAt === "string" ? worldValue.updatedAt : "",
+                entries: normalizedEntries
+            };
+        }
+        return emptyStore;
+    }
+    function writeSharedHighScoreStore(store) {
+        var path = resolveHighScoreJsonPath();
+        var payload = JSON.stringify(store, null, 2) + "\n";
+        if (!ensureParentDirectory(path)) {
+            return false;
+        }
+        return ZZT.runtime.writeBinaryFile(path, stringToBytes(payload));
+    }
+    function resolveSaveRootPath() {
+        var configured = trimSpaces(ZZT.SaveRootPath);
+        if (configured.length <= 0) {
+            return ZZT.execPath(DEFAULT_SAVE_ROOT_REL_PATH);
+        }
+        if (isAbsoluteFilePath(configured)) {
+            return configured;
+        }
+        return ZZT.execPath(configured);
+    }
+    function currentUserSaveKey() {
+        var userNumber = "";
+        var userName = getCurrentUserName();
+        if (typeof user !== "undefined" &&
+            typeof user.number === "number" &&
+            isFinite(user.number) &&
+            user.number > 0) {
+            userNumber = String(Math.floor(user.number));
+        }
+        if (userNumber.length > 0) {
+            return "u" + toSafePathPart(userNumber + "-" + userName, "user");
+        }
+        return "u" + toSafePathPart(userName, "user");
+    }
+    function currentUserSaveDir() {
+        return pathJoin(resolveSaveRootPath(), currentUserSaveKey() + "/");
+    }
+    function BuildDefaultSaveFileName() {
+        var base;
+        var value;
+        if (typeof user !== "undefined" &&
+            typeof user.number === "number" &&
+            isFinite(user.number) &&
+            user.number > 0) {
+            return ("S" + String(Math.floor(user.number))).slice(0, 8);
+        }
+        base = getCurrentUserName().toUpperCase().replace(/[^A-Z0-9]+/g, "");
+        if (base.length <= 0) {
+            return "SAVED";
+        }
+        value = "S" + base;
+        if (value.length > 8) {
+            value = value.slice(0, 8);
+        }
+        return value;
+    }
+    ZZT.BuildDefaultSaveFileName = BuildDefaultSaveFileName;
     function getHighScorePathCandidates() {
         var paths = [];
         var baseName = ZZT.LoadedGameFileName.length > 0 ? ZZT.LoadedGameFileName : ZZT.World.Info.Name;
         var hasPathSep = baseName.indexOf("/") >= 0 || baseName.indexOf("\\") >= 0;
+        if (upperCase(baseName.slice(baseName.length - 4)) === ".SAV" && ZZT.World.Info.Name.length > 0) {
+            baseName = ZZT.World.Info.Name;
+            hasPathSep = false;
+        }
         function addHiVariants(pathBase) {
             pushUniquePath(paths, pathBase + ".HI");
             pushUniquePath(paths, pathBase + ".hi");
@@ -6472,8 +6866,8 @@ var ZZT;
         var primary;
         var resFallback;
         var hasPathSep = filename.indexOf("/") >= 0 || filename.indexOf("\\") >= 0;
-        var isAbsolutePath = (filename.length > 0 && (filename.charAt(0) === "/" || filename.charAt(0) === "\\")) ||
-            filename.indexOf(":") >= 0;
+        var isAbsolutePath = isAbsoluteFilePath(filename);
+        var savePath;
         if (hasPathSep || isAbsolutePath) {
             if (isAbsolutePath) {
                 for (i = 0; i < fullNames.length; i += 1) {
@@ -6494,6 +6888,23 @@ var ZZT;
                 }
             }
             return ZZT.execPath(fullName);
+        }
+        if (upperCase(extension) === ".SAV") {
+            for (i = 0; i < fullNames.length; i += 1) {
+                savePath = pathJoin(currentUserSaveDir(), fullNames[i]);
+                if (fileExists(savePath)) {
+                    return savePath;
+                }
+                zztFilesPrimary = ZZT.execPath("zzt_files/" + fullNames[i]);
+                if (fileExists(zztFilesPrimary)) {
+                    return zztFilesPrimary;
+                }
+                primary = ZZT.execPath(fullNames[i]);
+                if (fileExists(primary)) {
+                    return primary;
+                }
+            }
+            return pathJoin(currentUserSaveDir(), fullName);
         }
         for (i = 0; i < fullNames.length; i += 1) {
             zztFilesPrimary = ZZT.execPath("zzt_files/" + fullNames[i]);
@@ -6770,6 +7181,10 @@ var ZZT;
             ZZT.World.BoardLen[boardId] = boardData.length;
             pushUInt16(fileBytes, boardData.length);
             appendBytes(fileBytes, boardData);
+        }
+        if (!ensureParentDirectory(path)) {
+            BoardOpen(currentBoardId);
+            return false;
         }
         var result = ZZT.runtime.writeBinaryFile(path, fileBytes);
         BoardOpen(currentBoardId);
@@ -7103,21 +7518,53 @@ var ZZT;
     }
     ZZT.SidebarPromptYesNo = SidebarPromptYesNo;
     function HighScoresLoad() {
+        var worldKey = getCurrentScoreWorldKey();
+        var store = readSharedHighScoreStore();
+        var record = store.worlds[worldKey];
         var paths = getHighScorePathCandidates();
         var i;
         var bytes;
+        ActiveHighScoreEntries = [];
         resetHighScoreList();
+        if (typeof record !== "undefined") {
+            setActiveHighScoreEntries(record.entries);
+            if (ActiveHighScoreEntries.length > 0) {
+                return;
+            }
+        }
         for (i = 0; i < paths.length; i += 1) {
             bytes = ZZT.runtime.readBinaryFile(paths[i]);
             if (bytes !== null && parseHighScoreList(bytes)) {
+                if (ActiveHighScoreEntries.length > 0) {
+                    HighScoresSave();
+                }
                 return;
             }
         }
     }
     ZZT.HighScoresLoad = HighScoresLoad;
     function HighScoresSave() {
+        var worldKey = getCurrentScoreWorldKey();
+        var store = readSharedHighScoreStore();
+        var entries = ActiveHighScoreEntries.length > 0 ? ActiveHighScoreEntries.slice(0) : getActiveHighScoreEntriesFromList();
         var paths = getHighScorePathCandidates();
         var targetPath = paths.length > 0 ? paths[0] : ZZT.execPath("ZZT.HI");
+        if (entries.length > ZZT.HIGH_SCORE_COUNT) {
+            entries = entries.slice(0, ZZT.HIGH_SCORE_COUNT);
+        }
+        setActiveHighScoreEntries(entries);
+        entries = ActiveHighScoreEntries.slice(0);
+        if (entries.length > 0) {
+            store.worlds[worldKey] = {
+                updatedAt: currentIsoTimestamp(),
+                entries: entries
+            };
+        }
+        else if (typeof store.worlds[worldKey] !== "undefined") {
+            delete store.worlds[worldKey];
+        }
+        writeSharedHighScoreStore(store);
+        ensureParentDirectory(targetPath);
         ZZT.runtime.writeBinaryFile(targetPath, serializeHighScoreList());
     }
     ZZT.HighScoresSave = HighScoresSave;
@@ -7132,7 +7579,7 @@ var ZZT;
             if (ZZT.HighScoreList[i].Score >= 0) {
                 displayName = ZZT.HighScoreList[i].Name;
                 if (displayName.length <= 0) {
-                    displayName = "-- You! --";
+                    displayName = "Unknown Player";
                 }
                 scoreStr = padLeft(String(ZZT.HighScoreList[i].Score), 5);
                 ZZT.TextWindowAppend(state, scoreStr + "  " + displayName);
@@ -7159,7 +7606,7 @@ var ZZT;
             state.LinePos = state.LineCount;
         }
         if (state.LineCount > 2) {
-            state.Title = "High scores for " + ZZT.World.Info.Name;
+            state.Title = "High scores for " + (ZZT.World.Info.Name.length > 0 ? ZZT.World.Info.Name : splitBaseName(getCurrentScoreWorldKey()));
             ZZT.TextWindowDrawOpen(state);
             ZZT.TextWindowSelect(state, false, true);
             ZZT.TextWindowDrawClose(state);
@@ -7168,9 +7615,10 @@ var ZZT;
     }
     ZZT.HighScoresDisplay = HighScoresDisplay;
     function HighScoresAdd(score) {
-        var listPos = 1;
-        var i;
-        var name;
+        var entries = ActiveHighScoreEntries.slice(0);
+        var listPos = 0;
+        var entry;
+        var boardTitle = ZZT.World.Info.Name.length > 0 ? ZZT.World.Info.Name : splitBaseName(getCurrentScoreWorldKey());
         var textWindow = {
             Selectable: false,
             LineCount: 0,
@@ -7181,29 +7629,29 @@ var ZZT;
             LoadedFilename: "",
             ScreenCopy: []
         };
-        while (listPos <= ZZT.HIGH_SCORE_COUNT && score < ZZT.HighScoreList[listPos].Score) {
+        while (listPos < entries.length && score < entries[listPos].score) {
             listPos += 1;
         }
-        if (listPos > ZZT.HIGH_SCORE_COUNT || score <= 0) {
+        if (listPos >= ZZT.HIGH_SCORE_COUNT || score <= 0) {
             return;
         }
-        for (i = ZZT.HIGH_SCORE_COUNT - 1; i >= listPos; i -= 1) {
-            ZZT.HighScoreList[i + 1].Name = ZZT.HighScoreList[i].Name;
-            ZZT.HighScoreList[i + 1].Score = ZZT.HighScoreList[i].Score;
+        entry = {
+            player: getCurrentUserName(),
+            bbs: getCurrentBbsName(),
+            score: score,
+            recordedAt: currentIsoTimestamp()
+        };
+        entries.splice(listPos, 0, entry);
+        if (entries.length > ZZT.HIGH_SCORE_COUNT) {
+            entries = entries.slice(0, ZZT.HIGH_SCORE_COUNT);
         }
-        ZZT.HighScoreList[listPos].Score = score;
-        ZZT.HighScoreList[listPos].Name = "-- You! --";
-        highScoresInitTextWindow(textWindow);
-        textWindow.LinePos = listPos;
-        textWindow.Title = "New high score for " + ZZT.World.Info.Name;
-        ZZT.TextWindowDrawOpen(textWindow);
-        ZZT.TextWindowDraw(textWindow, false, false);
-        name = PopupPromptString("Congratulations!  Enter your name:", "");
-        if (name.length <= 0) {
-            name = "-- You! --";
-        }
-        ZZT.HighScoreList[listPos].Name = name;
+        setActiveHighScoreEntries(entries);
         HighScoresSave();
+        highScoresInitTextWindow(textWindow);
+        textWindow.LinePos = listPos + 1;
+        textWindow.Title = "New high score for " + boardTitle;
+        ZZT.TextWindowDrawOpen(textWindow);
+        ZZT.TextWindowSelect(textWindow, false, false);
         ZZT.TextWindowDrawClose(textWindow);
         TransitionDrawToBoard();
         ZZT.TextWindowFree(textWindow);
@@ -8543,7 +8991,7 @@ var ZZT;
         var marker = "ZZT_FILES/";
         var markerPos = normalizedUpper.indexOf(marker);
         var relativeWithExt;
-        if (markerPos >= 0) {
+        if (upperCase(extension) === ".ZZT" && markerPos >= 0) {
             relativeWithExt = normalized.slice(markerPos);
             return stripExtension(relativeWithExt, extension);
         }
@@ -8552,34 +9000,41 @@ var ZZT;
     function listFilesByExtension(extension) {
         var files = [];
         var listed = [];
-        var listedSharedTopLevel = [];
-        var listedSharedNested = [];
-        var listedRoot = [];
-        var listedLegacyRes = [];
-        var listedTopLevelPacks = [];
-        var listedNestedPacks = [];
+        var listedPrimary = [];
+        var listedSecondary = [];
+        var listedTertiary = [];
+        var listedLegacy = [];
         var i;
         var entryName;
         var upperExt = upperCase(extension);
         var seen = {};
+        var rawName;
         if (typeof directory !== "function") {
             return files;
         }
-        // Preferred world drop location: /xtrn/zzt/zzt_files (+ one subdirectory level for packs).
-        listedTopLevelPacks = directory(ZZT.execPath("zzt_files/*"));
-        listedNestedPacks = directory(ZZT.execPath("zzt_files/*/*"));
-        // Shared location: /xtrn/zzt_files (+ one subdirectory level for packs).
-        listedSharedTopLevel = directory(ZZT.execPath("../zzt_files/*"));
-        listedSharedNested = directory(ZZT.execPath("../zzt_files/*/*"));
-        // Legacy fallback locations kept for compatibility.
-        listedRoot = directory(ZZT.execPath("*"));
-        listedLegacyRes = directory(ZZT.execPath("reconstruction-of-zzt-master/RES/*"));
-        listed = listed.concat(listedTopLevelPacks);
-        listed = listed.concat(listedNestedPacks);
-        listed = listed.concat(listedSharedTopLevel);
-        listed = listed.concat(listedSharedNested);
-        listed = listed.concat(listedRoot);
-        listed = listed.concat(listedLegacyRes);
+        if (upperExt === ".SAV") {
+            listedPrimary = directory(pathJoin(currentUserSaveDir(), "*"));
+            listedSecondary = directory(ZZT.execPath("zzt_files/*"));
+            listedTertiary = directory(ZZT.execPath("*"));
+            listed = listed.concat(listedPrimary);
+            listed = listed.concat(listedSecondary);
+            listed = listed.concat(listedTertiary);
+        }
+        else {
+            // Preferred world drop location: /xtrn/zzt/zzt_files (+ one subdirectory level for packs).
+            listedPrimary = directory(ZZT.execPath("zzt_files/*"));
+            listedSecondary = directory(ZZT.execPath("zzt_files/*/*"));
+            // Shared location: /xtrn/zzt_files (+ one subdirectory level for packs).
+            listedTertiary = directory(ZZT.execPath("../zzt_files/*"));
+            listedLegacy = directory(ZZT.execPath("../zzt_files/*/*"));
+            // Legacy fallback locations kept for compatibility.
+            listed = listed.concat(listedPrimary);
+            listed = listed.concat(listedSecondary);
+            listed = listed.concat(listedTertiary);
+            listed = listed.concat(listedLegacy);
+            listed = listed.concat(directory(ZZT.execPath("*")));
+            listed = listed.concat(directory(ZZT.execPath("reconstruction-of-zzt-master/RES/*")));
+        }
         for (i = 0; i < listed.length; i += 1) {
             if (typeof file_isdir === "function" && file_isdir(listed[i])) {
                 continue;
@@ -8589,7 +9044,7 @@ var ZZT;
                 continue;
             }
             if (upperExt.length > 0) {
-                var rawName = listed[i];
+                rawName = listed[i];
                 if (upperCase(rawName.slice(rawName.length - upperExt.length)) !== upperExt) {
                     continue;
                 }
@@ -8601,6 +9056,15 @@ var ZZT;
             files.push(entryName);
         }
         files.sort(function (a, b) {
+            if (upperExt === ".SAV") {
+                if (upperCase(a) < upperCase(b)) {
+                    return -1;
+                }
+                if (upperCase(a) > upperCase(b)) {
+                    return 1;
+                }
+                return 0;
+            }
             var aUpper = upperCase(a);
             var bUpper = upperCase(b);
             var aPreferred = aUpper.indexOf("ZZT_FILES/") === 0;
@@ -9574,6 +10038,55 @@ var ZZT;
     function startsWithSlash(value) {
         return value.length > 0 && value.charAt(0) === "/";
     }
+    function trimSpaces(value) {
+        return String(value || "").replace(/^\s+/, "").replace(/\s+$/, "");
+    }
+    function normalizeIniKey(key) {
+        return trimSpaces(key).replace(/[\s\-]+/g, "_").toUpperCase();
+    }
+    function stripOptionalQuotes(value) {
+        var trimmed = trimSpaces(value);
+        var quote;
+        if (trimmed.length >= 2) {
+            quote = trimmed.charAt(0);
+            if ((quote === "\"" || quote === "'") && trimmed.charAt(trimmed.length - 1) === quote) {
+                return trimmed.slice(1, trimmed.length - 1);
+            }
+        }
+        return trimmed;
+    }
+    function applyIniOverrides() {
+        var lines = ZZT.runtime.readTextFileLines(ZZT.execPath("zzt.ini"));
+        var i;
+        var line;
+        var eqPos;
+        var key;
+        var value;
+        if (lines.length <= 0) {
+            lines = ZZT.runtime.readTextFileLines(ZZT.execPath("ZZT.INI"));
+        }
+        for (i = 0; i < lines.length; i += 1) {
+            line = trimSpaces(lines[i]);
+            if (line.length <= 0 || line.charAt(0) === ";" || line.charAt(0) === "#" || line.charAt(0) === "[") {
+                continue;
+            }
+            eqPos = line.indexOf("=");
+            if (eqPos <= 0) {
+                continue;
+            }
+            key = normalizeIniKey(line.slice(0, eqPos));
+            value = stripOptionalQuotes(line.slice(eqPos + 1));
+            if (key === "HIGH_SCORE_JSON" || key === "HIGHSCORE_JSON") {
+                ZZT.HighScoreJsonPath = value;
+            }
+            else if (key === "HIGH_SCORE_BBS" || key === "HIGHSCORE_BBS" || key === "BBS_NAME") {
+                ZZT.HighScoreBbsName = value;
+            }
+            else if (key === "SAVE_ROOT" || key === "SAVES_ROOT") {
+                ZZT.SaveRootPath = value;
+            }
+        }
+    }
     function setDefaultWorldDescriptions() {
         ZZT.setWorldFileDescriptions(["TOWN", "DEMO", "CAVES", "DUNGEONS", "CITY", "BEST", "TOUR"], [
             "TOWN       The Town of ZZT",
@@ -9627,6 +10140,9 @@ var ZZT;
         ZZT.EditorEnabled = true;
         ZZT.ConfigRegistration = "";
         ZZT.ConfigWorldFile = "";
+        ZZT.HighScoreJsonPath = "";
+        ZZT.HighScoreBbsName = "";
+        ZZT.SaveRootPath = "";
         ZZT.GameVersion = "3.2";
         var cfgLines = ZZT.runtime.readTextFileLines(ZZT.execPath("zzt.cfg"));
         if (cfgLines.length > 0) {
@@ -9642,6 +10158,7 @@ var ZZT;
         if (ZZT.ConfigWorldFile.length !== 0) {
             ZZT.StartupWorldFileName = ZZT.ConfigWorldFile;
         }
+        applyIniOverrides();
         ZZT.InputInitDevices();
         ZZT.ParsingConfigFile = false;
         showConfigHeader();
@@ -9661,7 +10178,7 @@ var ZZT;
         ZZT.VideoHideCursor();
         ZZT.runtime.clearScreen();
         ZZT.TickSpeed = 4;
-        ZZT.SavedGameFileName = "SAVED";
+        ZZT.SavedGameFileName = ZZT.BuildDefaultSaveFileName();
         ZZT.SavedBoardFileName = "TEMP";
         ZZT.GenerateTransitionTable();
         ZZT.WorldCreate();

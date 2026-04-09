@@ -581,6 +581,9 @@ namespace ZZT {
   export var JustStarted: boolean = false;
   export var ConfigRegistration: string = "";
   export var ConfigWorldFile: string = "";
+  export var HighScoreJsonPath: string = "";
+  export var HighScoreBbsName: string = "";
+  export var SaveRootPath: string = "";
   export var GameVersion: string = "3.2";
 
   export var HighScoreList: HighScoreEntry[] = createHighScoreList();
