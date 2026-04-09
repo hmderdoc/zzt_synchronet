@@ -56,6 +56,7 @@
     var clickSequence = 0;
     var tapFallbackTimer = null;
     var terminalUiBuffer = '';
+    var parentAudioUnlockBound = false;
 
     /* fTelnet CP437 bitmap font sizes (exact PNGs, sorted largest-first).
        Same order as fTelnet's GetBestFit — this IS the contract. */
@@ -100,6 +101,25 @@
         if (window.parent && window.parent !== window) {
             window.parent.postMessage(msg, location.origin);
         }
+    }
+
+    function requestParentAudioUnlock() {
+        try {
+            if (window.parent &&
+                window.parent !== window &&
+                window.parent.FLWeb &&
+                typeof window.parent.FLWeb.unlockAudio === 'function') {
+                window.parent.FLWeb.unlockAudio();
+            }
+        } catch (_) {}
+    }
+
+    function installParentAudioUnlockBridge() {
+        if (parentAudioUnlockBound) return;
+        ['keydown', 'pointerdown', 'mousedown', 'touchstart'].forEach(function (type) {
+            window.addEventListener(type, requestParentAudioUnlock, true);
+        });
+        parentAudioUnlockBound = true;
     }
 
     function parseTerminalUiPayload(payload) {
@@ -806,6 +826,7 @@
 
 
     installTerminalUiSocketBridge();
+    installParentAudioUnlockBridge();
 
     function initTerminal(cfg) {
         if (typeof fTelnetOptions === 'undefined' ||
