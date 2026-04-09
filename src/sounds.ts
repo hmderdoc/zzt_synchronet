@@ -49,11 +49,32 @@ namespace ZZT {
     });
   }
 
+  function writeBridgeRaw(text: string): boolean {
+    if (typeof console === "undefined") {
+      return false;
+    }
+
+    try {
+      if (typeof console.write === "function") {
+        console.write(text);
+        return true;
+      }
+      if (typeof console.print === "function") {
+        console.print(text);
+        return true;
+      }
+    } catch (_err) {
+      return false;
+    }
+
+    return false;
+  }
+
   function emitBridgePacket(action: string, payload: { [name: string]: unknown }): boolean {
     var packet: { [name: string]: unknown } = {};
     var key: string;
 
-    if (typeof console === "undefined" || typeof console.print !== "function") {
+    if (typeof console === "undefined") {
       return false;
     }
 
@@ -64,12 +85,7 @@ namespace ZZT {
       }
     }
 
-    try {
-      console.print("\x1b_" + BRIDGE_PREFIX + buildAsciiSafeJson(packet) + "\x1b\\");
-      return true;
-    } catch (_err) {
-      return false;
-    }
+    return writeBridgeRaw("\x1b_" + BRIDGE_PREFIX + buildAsciiSafeJson(packet) + "\x1b\\");
   }
 
   function soundBridgeProbe(timeoutMs: number): boolean {
@@ -84,7 +100,7 @@ namespace ZZT {
     var flushDeadline: number;
 
     if (typeof console === "undefined" ||
-        typeof console.print !== "function" ||
+        (typeof console.write !== "function" && typeof console.print !== "function") ||
         typeof console.inkey !== "function") {
       return false;
     }

@@ -3485,10 +3485,29 @@ var ZZT;
             return "\\u" + code;
         });
     }
+    function writeBridgeRaw(text) {
+        if (typeof console === "undefined") {
+            return false;
+        }
+        try {
+            if (typeof console.write === "function") {
+                console.write(text);
+                return true;
+            }
+            if (typeof console.print === "function") {
+                console.print(text);
+                return true;
+            }
+        }
+        catch (_err) {
+            return false;
+        }
+        return false;
+    }
     function emitBridgePacket(action, payload) {
         var packet = {};
         var key;
-        if (typeof console === "undefined" || typeof console.print !== "function") {
+        if (typeof console === "undefined") {
             return false;
         }
         packet.action = action;
@@ -3497,13 +3516,7 @@ var ZZT;
                 packet[key] = payload[key];
             }
         }
-        try {
-            console.print("\x1b_" + BRIDGE_PREFIX + buildAsciiSafeJson(packet) + "\x1b\\");
-            return true;
-        }
-        catch (_err) {
-            return false;
-        }
+        return writeBridgeRaw("\x1b_" + BRIDGE_PREFIX + buildAsciiSafeJson(packet) + "\x1b\\");
     }
     function soundBridgeProbe(timeoutMs) {
         var nonce;
@@ -3516,7 +3529,7 @@ var ZZT;
         var data;
         var flushDeadline;
         if (typeof console === "undefined" ||
-            typeof console.print !== "function" ||
+            (typeof console.write !== "function" && typeof console.print !== "function") ||
             typeof console.inkey !== "function") {
             return false;
         }
@@ -4847,28 +4860,32 @@ var ZZT;
     ZZT.VideoCursorVisible = true;
     var VideoShadowChars = [];
     var VideoShadowAttrs = [];
-    var CP437_CONTROL_GLYPHS = [
-        " ",
-        "\u263A", "\u263B", "\u2665", "\u2666", "\u2663", "\u2660", "\u2022",
-        "\u25D8", "\u25CB", "\u25D9", "\u2642", "\u2640", "\u266A", "\u266B", "\u263C",
-        "\u25BA", "\u25C4", "\u2195", "\u203C", "\u00B6", "\u00A7", "\u25AC", "\u21A8",
-        "\u2191", "\u2193", "\u2192", "\u2190", "\u221F", "\u2194", "\u25B2", "\u25BC"
-    ];
+    function mapConsumedControlCode(code) {
+        /* Some CP437 control-range bytes are consumed by terminal parsers
+           (BEL/BS/TAB/LF/FF/CR/ESC). Substitute visually-close printable
+           bytes so gameplay UI remains stable in web and ANSI clients. */
+        switch (code) {
+            case 7: return 249; /* bullet -> middle dot */
+            case 8: return 248; /* inverse bullet -> degree */
+            case 9: return 248; /* circle -> degree */
+            case 10: return 248; /* dotted circle (door) -> degree */
+            case 12: return 11; /* female (key) -> male symbol */
+            case 13: return 14; /* single note -> double note */
+            case 27: return 17; /* left arrow -> left-pointing triangle */
+            default: return code;
+        }
+    }
     function translateCp437Text(text) {
         var i;
         var code;
         var translated = "";
         for (i = 0; i < text.length; i += 1) {
             code = text.charCodeAt(i);
-            if (code < 32) {
-                translated += CP437_CONTROL_GLYPHS[code];
-            }
-            else if (code === 127) {
-                translated += "\u2302";
-            }
-            else {
+            if (code > 255) {
                 translated += text.charAt(i);
+                continue;
             }
+            translated += String.fromCharCode(mapConsumedControlCode(code & 0xff));
         }
         return translated;
     }
