@@ -19,7 +19,7 @@ nodejs build.js
 
 The build emits:
 
-- `/sbbs/xtrn/zzt/zzt.js`
+- `/sbbs/xtrn/zzt/zzt.js` <--- This is the door game.
 
 ## External Worlds
 
@@ -40,6 +40,8 @@ World/save file discovery is now extension-case-insensitive (for example `.zzt`,
 No built-in downloader is included. Sysops manually place files from world archives.
 
 Common sources:
+
+- mega-archive off my bbs: https://futureland.today/api/files.ssjs?call=download-file&dir=games&file=ZZT_ARCHIVE.zip
 
 - Museum of ZZT (archive + mass downloads): `https://museumofzzt.com/file/mass-downloads/`
 - z2 (community portal; links to archives): `https://zzt.org/`

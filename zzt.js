@@ -5770,18 +5770,76 @@ var ZZT;
         var splitPos;
         var key;
         var titleHint;
+        var keyCode;
+        var typeAhead = "";
+        var typeAheadTickMs = 0;
+        function startsWithPrefix(value, prefix) {
+            if (prefix.length > value.length) {
+                return false;
+            }
+            return value.slice(0, prefix.length) === prefix;
+        }
+        function normalizeTypeAheadText(value) {
+            var text = value;
+            if (text.length > 0 && text.charAt(0) === "!") {
+                text = text.slice(1);
+            }
+            while (text.length > 0 && (text.charAt(0) === " " || text.charAt(0) === "\t")) {
+                text = text.slice(1);
+            }
+            if (text.length > 0 && text.charAt(text.length - 1) === "/") {
+                text = text.slice(0, text.length - 1);
+            }
+            return upperString(text);
+        }
+        function findTypeAheadMatch(prefix) {
+            var startLine = state.LinePos + 1;
+            var pass;
+            var lineNo;
+            var text;
+            var fromLine;
+            var toLine;
+            if (state.LineCount <= 0 || prefix.length <= 0) {
+                return 0;
+            }
+            for (pass = 0; pass < 2; pass += 1) {
+                if (pass === 0) {
+                    fromLine = startLine;
+                    toLine = state.LineCount;
+                }
+                else {
+                    fromLine = 1;
+                    toLine = state.LinePos;
+                }
+                if (fromLine > toLine) {
+                    continue;
+                }
+                for (lineNo = fromLine; lineNo <= toLine; lineNo += 1) {
+                    text = normalizeTypeAheadText(getLine(state, lineNo));
+                    if (startsWithPrefix(text, prefix)) {
+                        return lineNo;
+                    }
+                }
+            }
+            return 0;
+        }
         ZZT.TextWindowRejected = false;
         state.Hyperlink = "";
         TextWindowDraw(state, false, viewingFile);
         while (!ZZT.runtime.isTerminated()) {
             ZZT.InputReadWaitKey();
             key = ZZT.InputKeyPressed;
+            keyCode = key.length > 0 ? (key.charCodeAt(0) & 0xff) : 0;
             newLinePos = state.LinePos;
             if (ZZT.InputDeltaY !== 0) {
                 newLinePos += ZZT.InputDeltaY;
+                typeAhead = "";
+                typeAheadTickMs = 0;
             }
             else if (ZZT.InputShiftPressed || key === ZZT.KEY_ENTER) {
                 ZZT.InputShiftAccepted = true;
+                typeAhead = "";
+                typeAheadTickMs = 0;
                 line = getLine(state, state.LinePos);
                 if (line.length > 0 && line.charAt(0) === "!") {
                     pointerStr = line.slice(1);
@@ -5823,12 +5881,36 @@ var ZZT;
             else {
                 if (key === ZZT.KEY_PAGE_UP) {
                     newLinePos -= ZZT.TextWindowHeight - 4;
+                    typeAhead = "";
+                    typeAheadTickMs = 0;
                 }
                 else if (key === ZZT.KEY_PAGE_DOWN) {
                     newLinePos += ZZT.TextWindowHeight - 4;
+                    typeAhead = "";
+                    typeAheadTickMs = 0;
                 }
                 else if (key === ZZT.KEY_ALT_P || (viewingFile && upperString(key) === "P")) {
                     textWindowPrint(state);
+                }
+                else if (state.Selectable && keyCode >= 32 && keyCode <= 126) {
+                    var nowMs = new Date().getTime();
+                    var keyUpper = upperString(key);
+                    var matchedLine;
+                    if (typeAheadTickMs <= 0 || (nowMs - typeAheadTickMs) > 1200) {
+                        typeAhead = keyUpper;
+                    }
+                    else if (typeAhead.length < 24) {
+                        typeAhead += keyUpper;
+                    }
+                    typeAheadTickMs = nowMs;
+                    matchedLine = findTypeAheadMatch(typeAhead);
+                    if (matchedLine === 0 && typeAhead.length > 1) {
+                        typeAhead = keyUpper;
+                        matchedLine = findTypeAheadMatch(typeAhead);
+                    }
+                    if (matchedLine > 0) {
+                        newLinePos = matchedLine;
+                    }
                 }
             }
             if (state.LineCount > 0) {
@@ -7317,6 +7399,11 @@ var ZZT;
         var context;
         var desiredDeltaX;
         var desiredDeltaY;
+        if (ZZT.World.Info.Health <= 0) {
+            ZZT.InputDeltaX = 0;
+            ZZT.InputDeltaY = 0;
+            return;
+        }
         if (ZZT.InputDeltaX === 0 && ZZT.InputDeltaY === 0) {
             return;
         }
@@ -9014,6 +9101,210 @@ var ZZT;
         }
         return splitBaseName(path);
     }
+    function ensureTrailingSlash(path) {
+        var normalized = normalizeSlashes(path);
+        if (normalized.length > 0 && normalized.charAt(normalized.length - 1) !== "/") {
+            normalized += "/";
+        }
+        return normalized;
+    }
+    function splitLeafName(path) {
+        var p = normalizeSlashes(path);
+        var slashPos = p.lastIndexOf("/");
+        if (slashPos >= 0) {
+            return p.slice(slashPos + 1);
+        }
+        return p;
+    }
+    function trimPathSeparators(path) {
+        var p = normalizeSlashes(path);
+        while (p.length > 0 && p.charAt(0) === "/") {
+            p = p.slice(1);
+        }
+        while (p.length > 0 && p.charAt(p.length - 1) === "/") {
+            p = p.slice(0, p.length - 1);
+        }
+        return p;
+    }
+    function trimTrailingSlash(path) {
+        var p = normalizeSlashes(path);
+        while (p.length > 0 && p.charAt(p.length - 1) === "/") {
+            p = p.slice(0, p.length - 1);
+        }
+        return p;
+    }
+    function worldParentRelativeDir(relativeDir) {
+        var normalized = trimTrailingSlash(relativeDir);
+        var slashPos = normalized.lastIndexOf("/");
+        if (slashPos < 0) {
+            return "";
+        }
+        return normalized.slice(0, slashPos + 1);
+    }
+    function pathStartsWithIgnoreCase(path, prefix) {
+        var normalizedPath = normalizeSlashes(path);
+        var normalizedPrefix = normalizeSlashes(prefix);
+        return upperCase(normalizedPath).indexOf(upperCase(normalizedPrefix)) === 0;
+    }
+    function pathLeafFromParent(parentPath, entryPath) {
+        var parent = ensureTrailingSlash(parentPath);
+        var entry = normalizeSlashes(entryPath);
+        var child;
+        var slashPos;
+        if (pathStartsWithIgnoreCase(entry, parent)) {
+            child = entry.slice(parent.length);
+        }
+        else {
+            child = splitLeafName(entry);
+        }
+        child = trimPathSeparators(child);
+        slashPos = child.indexOf("/");
+        if (slashPos >= 0) {
+            child = child.slice(0, slashPos);
+        }
+        return child;
+    }
+    function worldFileMatchesExtension(path, extension) {
+        var normalized = normalizeSlashes(path);
+        var upperExt = upperCase(extension);
+        if (upperExt.length <= 0 || normalized.length < upperExt.length) {
+            return false;
+        }
+        return upperCase(normalized.slice(normalized.length - upperExt.length)) === upperExt;
+    }
+    function worldBuildIdentifier(prefix, relativeWithoutExt) {
+        var normalizedPrefix = normalizeSlashes(prefix);
+        var normalizedRelative = trimPathSeparators(relativeWithoutExt);
+        if (normalizedPrefix.length > 0 && normalizedPrefix.charAt(normalizedPrefix.length - 1) !== "/") {
+            normalizedPrefix += "/";
+        }
+        if (normalizedPrefix.length > 0) {
+            return normalizedPrefix + normalizedRelative;
+        }
+        return normalizedRelative;
+    }
+    function addWorldBrowseRoot(roots, seen, label, absolutePath, identifierPrefix) {
+        var normalizedAbsPath = ensureTrailingSlash(absolutePath);
+        var normalizedPrefix = ensureTrailingSlash(normalizeSlashes(identifierPrefix));
+        var seenId = upperCase(normalizedAbsPath);
+        if (normalizedAbsPath.length <= 0) {
+            return;
+        }
+        if (seen[seenId] === true) {
+            return;
+        }
+        if (typeof file_isdir === "function" && !file_isdir(normalizedAbsPath)) {
+            return;
+        }
+        seen[seenId] = true;
+        roots.push({
+            Label: label,
+            AbsolutePath: normalizedAbsPath,
+            IdentifierPrefix: normalizedPrefix
+        });
+    }
+    function getWorldBrowseRoots(extension) {
+        var roots = [];
+        var seen = {};
+        var upperExt = upperCase(extension);
+        if (upperExt === ".SAV") {
+            addWorldBrowseRoot(roots, seen, "My saves", currentUserSaveDir(), "");
+            return roots;
+        }
+        addWorldBrowseRoot(roots, seen, "Local zzt_files", ZZT.execPath("zzt_files/"), "zzt_files/");
+        addWorldBrowseRoot(roots, seen, "Shared zzt_files", ZZT.execPath("../zzt_files/"), "../zzt_files/");
+        if (roots.length <= 0) {
+            addWorldBrowseRoot(roots, seen, "Game directory", ZZT.execPath(""), "");
+            addWorldBrowseRoot(roots, seen, "Legacy RES", ZZT.execPath("reconstruction-of-zzt-master/RES/"), "reconstruction-of-zzt-master/RES/");
+        }
+        return roots;
+    }
+    function listWorldDirectoryEntries(root, relativeDir, extension) {
+        var entries = [];
+        var dirs = [];
+        var files = [];
+        var absDir = pathJoin(root.AbsolutePath, relativeDir);
+        var listed = [];
+        var i;
+        var entryPath;
+        var childNameRaw;
+        var childName;
+        var relPath;
+        var relWithoutExt;
+        var seenDirs = {};
+        var seenFiles = {};
+        var id;
+        if (typeof directory !== "function") {
+            return entries;
+        }
+        listed = directory(pathJoin(absDir, "*"));
+        for (i = 0; i < listed.length; i += 1) {
+            entryPath = normalizeSlashes(listed[i]);
+            childNameRaw = pathLeafFromParent(absDir, entryPath);
+            childName = trimPathSeparators(childNameRaw);
+            if (childName.length <= 0 || childName === "." || childName === "..") {
+                continue;
+            }
+            if (typeof file_isdir === "function" && file_isdir(entryPath)) {
+                id = upperCase(childName);
+                if (seenDirs[id] === true) {
+                    continue;
+                }
+                seenDirs[id] = true;
+                dirs.push({
+                    IsDirectory: true,
+                    Name: childName,
+                    RelativePath: relativeDir + childName + "/",
+                    Identifier: ""
+                });
+                continue;
+            }
+            if (!worldFileMatchesExtension(entryPath, extension)) {
+                continue;
+            }
+            relPath = relativeDir + childName;
+            relWithoutExt = stripExtension(relPath, extension);
+            if (relWithoutExt.length <= 0) {
+                continue;
+            }
+            id = upperCase(relWithoutExt);
+            if (seenFiles[id] === true) {
+                continue;
+            }
+            seenFiles[id] = true;
+            files.push({
+                IsDirectory: false,
+                Name: splitBaseName(childName),
+                RelativePath: relWithoutExt,
+                Identifier: worldBuildIdentifier(root.IdentifierPrefix, relWithoutExt)
+            });
+        }
+        dirs.sort(function (a, b) {
+            var aUpper = upperCase(a.Name);
+            var bUpper = upperCase(b.Name);
+            if (aUpper < bUpper) {
+                return -1;
+            }
+            if (aUpper > bUpper) {
+                return 1;
+            }
+            return 0;
+        });
+        files.sort(function (a, b) {
+            var aUpper = upperCase(a.Name);
+            var bUpper = upperCase(b.Name);
+            if (aUpper < bUpper) {
+                return -1;
+            }
+            if (aUpper > bUpper) {
+                return 1;
+            }
+            return 0;
+        });
+        entries = entries.concat(dirs);
+        entries = entries.concat(files);
+        return entries;
+    }
     function listFilesByExtension(extension) {
         var files = [];
         var listed = [];
@@ -9120,7 +9411,7 @@ var ZZT;
         }
         return name;
     }
-    function GameWorldLoad(extension) {
+    function gameWorldLoadFlat(extension) {
         var state = {
             Selectable: true,
             LineCount: 0,
@@ -9152,6 +9443,116 @@ var ZZT;
             return true;
         }
         return false;
+    }
+    function gameWorldLoadBrowse(extension) {
+        var state = {
+            Selectable: true,
+            LineCount: 0,
+            LinePos: 1,
+            Lines: [],
+            Hyperlink: "",
+            Title: "ZZT Worlds",
+            LoadedFilename: "",
+            ScreenCopy: []
+        };
+        var roots = getWorldBrowseRoots(extension);
+        var currentRootIndex = 0;
+        var currentRelativeDir = "";
+        var showRootList = roots.length > 1;
+        var includeParent = false;
+        var entries = [];
+        var selectedLine;
+        var selectedLineCount;
+        var entryIndex;
+        var selectedEntry;
+        var location;
+        var i;
+        if (roots.length <= 0) {
+            return gameWorldLoadFlat(extension);
+        }
+        while (!ZZT.runtime.isTerminated()) {
+            ZZT.TextWindowInitState(state);
+            if (showRootList) {
+                state.Title = "ZZT World Folders";
+                for (i = 0; i < roots.length; i += 1) {
+                    ZZT.TextWindowAppend(state, roots[i].Label);
+                }
+                ZZT.TextWindowAppend(state, "Exit");
+            }
+            else {
+                entries = listWorldDirectoryEntries(roots[currentRootIndex], currentRelativeDir, extension);
+                includeParent = currentRelativeDir.length > 0 || roots.length > 1;
+                location = roots[currentRootIndex].Label;
+                if (currentRelativeDir.length > 0) {
+                    location += "/" + trimTrailingSlash(currentRelativeDir);
+                }
+                state.Title = "ZZT Worlds: " + location;
+                if (includeParent) {
+                    ZZT.TextWindowAppend(state, "[..]");
+                }
+                for (i = 0; i < entries.length; i += 1) {
+                    if (entries[i].IsDirectory) {
+                        ZZT.TextWindowAppend(state, entries[i].Name + "/");
+                    }
+                    else {
+                        ZZT.TextWindowAppend(state, worldDisplayName(entries[i].Name, extension));
+                    }
+                }
+                ZZT.TextWindowAppend(state, "Exit");
+            }
+            ZZT.TextWindowDrawOpen(state);
+            ZZT.TextWindowSelect(state, false, false);
+            ZZT.TextWindowDrawClose(state);
+            selectedLine = state.LinePos;
+            selectedLineCount = state.LineCount;
+            ZZT.TextWindowFree(state);
+            if (ZZT.TextWindowRejected || selectedLine >= selectedLineCount) {
+                return false;
+            }
+            if (showRootList) {
+                if (selectedLine >= roots.length + 1) {
+                    return false;
+                }
+                currentRootIndex = selectedLine - 1;
+                currentRelativeDir = "";
+                showRootList = false;
+                continue;
+            }
+            entryIndex = selectedLine - 1;
+            if (includeParent) {
+                if (entryIndex === 0) {
+                    if (currentRelativeDir.length > 0) {
+                        currentRelativeDir = worldParentRelativeDir(currentRelativeDir);
+                    }
+                    else {
+                        showRootList = roots.length > 1;
+                    }
+                    continue;
+                }
+                entryIndex -= 1;
+            }
+            if (entryIndex >= entries.length) {
+                return false;
+            }
+            selectedEntry = entries[entryIndex];
+            if (selectedEntry.IsDirectory) {
+                currentRelativeDir = selectedEntry.RelativePath;
+                continue;
+            }
+            if (WorldLoad(selectedEntry.Identifier, extension, false)) {
+                TransitionDrawToFill(String.fromCharCode(219), 0x44);
+                return true;
+            }
+            return false;
+        }
+        ZZT.TextWindowFree(state);
+        return false;
+    }
+    function GameWorldLoad(extension) {
+        if (upperCase(extension) === ".ZZT") {
+            return gameWorldLoadBrowse(extension);
+        }
+        return gameWorldLoadFlat(extension);
     }
     ZZT.GameWorldLoad = GameWorldLoad;
     function GameWorldSave(prompt, filename, extension) {
@@ -9814,7 +10215,7 @@ var ZZT;
                 if (key === ZZT.KEY_ESCAPE || key === "Q") {
                     GamePromptEndPlay();
                 }
-                if (ZZT.InputDeltaX !== 0 || ZZT.InputDeltaY !== 0) {
+                if ((ZZT.InputDeltaX !== 0 || ZZT.InputDeltaY !== 0) && ZZT.World.Info.Health > 0) {
                     ZZT.PlayerDirX = ZZT.InputDeltaX;
                     ZZT.PlayerDirY = ZZT.InputDeltaY;
                     context = {
@@ -9835,6 +10236,7 @@ var ZZT;
                     }
                 }
                 else if ((key === "P" || key === ZZT.KEY_ENTER) &&
+                    ZZT.World.Info.Health > 0 &&
                     !ZZT.GamePlayExitRequested &&
                     ZZT.Board.Tiles[ZZT.Board.Stats[0].X][ZZT.Board.Stats[0].Y].Element === ZZT.E_PLAYER) {
                     // Synchronet UX tweak: allow explicit resume while paused.
@@ -9898,8 +10300,12 @@ var ZZT;
                 else if (key === "P" && ZZT.World.Info.Health > 0) {
                     ZZT.GamePaused = true;
                 }
-                if (!ZZT.GamePaused && !ZZT.GamePlayExitRequested && !playerTickedThisLoop) {
+                if (ZZT.World.Info.Health > 0 && !ZZT.GamePaused && !ZZT.GamePlayExitRequested && !playerTickedThisLoop) {
                     tryApplyPlayerDirectionalInput();
+                }
+                else if (ZZT.World.Info.Health <= 0) {
+                    ZZT.InputDeltaX = 0;
+                    ZZT.InputDeltaY = 0;
                 }
             }
             if (ZZT.GameStateElement === ZZT.E_MONITOR &&

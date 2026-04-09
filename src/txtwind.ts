@@ -736,6 +736,69 @@ namespace ZZT {
     var splitPos: number;
     var key: string;
     var titleHint: string;
+    var keyCode: number;
+    var typeAhead: string = "";
+    var typeAheadTickMs: number = 0;
+
+    function startsWithPrefix(value: string, prefix: string): boolean {
+      if (prefix.length > value.length) {
+        return false;
+      }
+      return value.slice(0, prefix.length) === prefix;
+    }
+
+    function normalizeTypeAheadText(value: string): string {
+      var text: string = value;
+
+      if (text.length > 0 && text.charAt(0) === "!") {
+        text = text.slice(1);
+      }
+
+      while (text.length > 0 && (text.charAt(0) === " " || text.charAt(0) === "\t")) {
+        text = text.slice(1);
+      }
+
+      if (text.length > 0 && text.charAt(text.length - 1) === "/") {
+        text = text.slice(0, text.length - 1);
+      }
+      return upperString(text);
+    }
+
+    function findTypeAheadMatch(prefix: string): number {
+      var startLine: number = state.LinePos + 1;
+      var pass: number;
+      var lineNo: number;
+      var text: string;
+      var fromLine: number;
+      var toLine: number;
+
+      if (state.LineCount <= 0 || prefix.length <= 0) {
+        return 0;
+      }
+
+      for (pass = 0; pass < 2; pass += 1) {
+        if (pass === 0) {
+          fromLine = startLine;
+          toLine = state.LineCount;
+        } else {
+          fromLine = 1;
+          toLine = state.LinePos;
+        }
+
+        if (fromLine > toLine) {
+          continue;
+        }
+
+        for (lineNo = fromLine; lineNo <= toLine; lineNo += 1) {
+          text = normalizeTypeAheadText(getLine(state, lineNo));
+          if (startsWithPrefix(text, prefix)) {
+            return lineNo;
+          }
+        }
+      }
+
+      return 0;
+    }
 
     TextWindowRejected = false;
     state.Hyperlink = "";
@@ -744,12 +807,17 @@ namespace ZZT {
     while (!runtime.isTerminated()) {
       InputReadWaitKey();
       key = InputKeyPressed;
+      keyCode = key.length > 0 ? (key.charCodeAt(0) & 0xff) : 0;
       newLinePos = state.LinePos;
 
       if (InputDeltaY !== 0) {
         newLinePos += InputDeltaY;
+        typeAhead = "";
+        typeAheadTickMs = 0;
       } else if (InputShiftPressed || key === KEY_ENTER) {
         InputShiftAccepted = true;
+        typeAhead = "";
+        typeAheadTickMs = 0;
         line = getLine(state, state.LinePos);
 
         if (line.length > 0 && line.charAt(0) === "!") {
@@ -791,10 +859,34 @@ namespace ZZT {
       } else {
         if (key === KEY_PAGE_UP) {
           newLinePos -= TextWindowHeight - 4;
+          typeAhead = "";
+          typeAheadTickMs = 0;
         } else if (key === KEY_PAGE_DOWN) {
           newLinePos += TextWindowHeight - 4;
+          typeAhead = "";
+          typeAheadTickMs = 0;
         } else if (key === KEY_ALT_P || (viewingFile && upperString(key) === "P")) {
           textWindowPrint(state);
+        } else if (state.Selectable && keyCode >= 32 && keyCode <= 126) {
+          var nowMs: number = new Date().getTime();
+          var keyUpper: string = upperString(key);
+          var matchedLine: number;
+
+          if (typeAheadTickMs <= 0 || (nowMs - typeAheadTickMs) > 1200) {
+            typeAhead = keyUpper;
+          } else if (typeAhead.length < 24) {
+            typeAhead += keyUpper;
+          }
+          typeAheadTickMs = nowMs;
+
+          matchedLine = findTypeAheadMatch(typeAhead);
+          if (matchedLine === 0 && typeAhead.length > 1) {
+            typeAhead = keyUpper;
+            matchedLine = findTypeAheadMatch(typeAhead);
+          }
+          if (matchedLine > 0) {
+            newLinePos = matchedLine;
+          }
         }
       }
 
