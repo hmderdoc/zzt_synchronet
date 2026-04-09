@@ -1,0 +1,5 @@
+# Pascal reference source (kept locally for comparison, not shipped in this repo)
+reconstruction-of-zzt-master/
+
+# Ignore packed world subdirectories; keep root-level files in zzt_files/
+zzt_files/*/
