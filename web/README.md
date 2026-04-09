@@ -61,7 +61,7 @@ Set/verify these values in your web deployment:
 
 ## Verification
 
-1. Open web terminal and run `EXPERIMENT3` (if installed).
+1. Open web terminal and run `EXPERIMENT3` from 'experiment3.js' (if installed as xtrn).
 2. Press `B` in Experiment3 for bridge detect and confirm detected.
 3. Run `ZZT`.
 4. Trigger sound events (fire, pickups, doors, bombs, etc.) and verify audible output.
