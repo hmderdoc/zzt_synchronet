@@ -18,57 +18,83 @@ In this context, it means:
 
 ## Included Files
 
+- `files/root/terminal.xjs` — standalone multimedia terminal page
 - `files/root/terminal-iframe.html`
 - `files/root/js/terminal.js`
 - `files/root/js/flweb.js`
 - `files/root/api/flweb-assets.ssjs`
 - `install-web-bridge.sh`
 
-## Install Into Stock `webv4` (Swap-In)
+## Install
 
 This is the intended path for a typical sysop install.
 
 ```bash
 cd /sbbs/xtrn/zzt/web
-./install-web-bridge.sh /sbbs/webv4
+./install-web-bridge.sh
 ```
 
-- If no path is passed, installer defaults to `/sbbs/webv4`.
+- The default target is `../../../webv4` (relative to the script), which resolves
+  to the `webv4` directory alongside `xtrn/`.
+- Pass an explicit path if your webv4 is elsewhere:
+  `./install-web-bridge.sh /sbbs/webv4`
 - Backups are written to: `<target>/.zzt-web-backup/<timestamp>/...`
 
-### What Gets Replaced
+### What Gets Deployed
 
+- `<target>/root/terminal.xjs` — **new standalone page** (no manual setup needed)
 - `<target>/root/terminal-iframe.html`
 - `<target>/root/js/terminal.js`
 - `<target>/root/js/flweb.js`
 - `<target>/root/api/flweb-assets.ssjs`
 
-The packaged `terminal-iframe.html` includes additional behavior (touch handlers, responsive row/column sizing, render-speed patches, audio-unlock hooks). These are bundled with the bridge swap by design.
+The installer backs up any existing files before overwriting them.
+
+## Standalone Terminal Page
+
+After install, a self-contained terminal page is available at:
+
+```
+http://<your-bbs-host>:<port>/terminal.xjs
+```
+
+- No changes to stock webv4 pages, navbar, or layout are required.
+- Logged-in users are auto-connected via RLogin.
+- Anonymous visitors see a connect button and join via Telnet.
+- The FLWEB audio bridge, toast notifications, and all ZZT sound
+  features work out of the box on this page.
 
 ## Do I Need To Build An Iframe By Hand?
 
-For stock `webv4`: no.
+No. The standalone `terminal.xjs` page provides the complete DOM scaffold.
+`terminal.js` creates the fTelnet iframe automatically.
 
-After swap-in, `root/js/terminal.js` creates the iframe automatically and sets:
+Sysops do not need to write any iframe or HTML code.
 
-- `iframe.src = './terminal-iframe.html'`
+## Embedding In A Custom Web Shell
 
-Sysops do not need to write iframe code for the normal install path.
-
-## If You Use A Custom Web Shell
-
-If your shell is not stock `webv4`, keep these required IDs so `terminal.js` can wire itself:
+If you want to embed the terminal into your own page instead of using
+`terminal.xjs`, these are the required DOM elements for `terminal.js`:
 
 ```html
 <div id="terminal-panel" class="is-hidden">
   <div id="terminal-iframe-container"></div>
 </div>
 <button id="btn-terminal" type="button">Terminal</button>
+<div id="chat-toasts"></div>
 ```
 
-And ensure these scripts are loaded by your page:
+Set `window.sbbsConfig` before loading the scripts:
 
 ```html
+<script>
+window.sbbsConfig = {
+    ftelnet: true,
+    hostname: location.hostname,
+    wsp: 1123, wssp: 11235,  /* your WS/WSS ports */
+    /* ... see terminal.xjs for the full list */
+};
+</script>
 <script src="./js/flweb.js"></script>
 <script src="./js/terminal.js"></script>
 ```
@@ -77,6 +103,7 @@ And ensure these scripts are loaded by your page:
 
 Copy from this pack:
 
+- `files/root/terminal.xjs` -> `<target>/root/terminal.xjs`
 - `files/root/terminal-iframe.html` -> `<target>/root/terminal-iframe.html`
 - `files/root/js/terminal.js` -> `<target>/root/js/terminal.js`
 - `files/root/js/flweb.js` -> `<target>/root/js/flweb.js`
@@ -84,19 +111,20 @@ Copy from this pack:
 
 ## Config Checklist
 
-- `modopts.ini` (`[web]`) points to the patched root (example: `web_directory=../webv4`).
-- Web shell loads `root/js/terminal.js` and `root/js/flweb.js`.
-- Terminal iframe source resolves to `root/terminal-iframe.html`.
-- `root/api/flweb-assets.ssjs` is present/executable.
+- `modopts.ini` (`[web]`) has `ftelnet=true` (this is the default).
+- WebSocket service (WS/WSS) is enabled in `services.ini`.
+- `root/api/flweb-assets.ssjs` is present and executable.
 - Browser audio requires at least one user interaction (normal autoplay policy).
 
 ## Verification
 
-1. Open web terminal and run `EXPERIMENT3` from `experiment3.js` (if installed as xtrn).
-2. Press `B` in Experiment3 and confirm bridge detect success.
-3. Run `ZZT`.
-4. Trigger sound effects (fire, pickups, doors, bombs).
-5. Load a world pack with MP3s and confirm background music playback.
+1. Navigate to `http://<host>:<port>/terminal.xjs`.
+2. Click the power button (or wait for auto-connect if logged in).
+3. Run `EXPERIMENT3` from `experiment3.js` (if installed as xtrn).
+4. Press `B` in Experiment3 and confirm bridge detect success.
+5. Run `ZZT`.
+6. Trigger sound effects (fire, pickups, doors, bombs).
+7. Load a world pack with MP3s and confirm background music playback.
 
 ## Rollback
 
@@ -104,5 +132,6 @@ Restore files from `<target>/.zzt-web-backup/<timestamp>/...` if you want to rev
 
 ## Notes
 
-- Stock `/sbbs/webv4` does not include this FLWEB bridge path by default.
+- Stock webv4 does not include the FLWEB bridge by default — this pack adds it.
+- The standalone `terminal.xjs` page does not modify any existing webv4 pages.
 - Non-web clients (telnet/ssh) continue to function; they just remain silent.

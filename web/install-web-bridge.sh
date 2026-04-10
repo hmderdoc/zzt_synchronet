@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TARGET_ROOT="${1:-/sbbs/webv4}"
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TARGET_ROOT="${1:-${SELF_DIR}/../../../webv4}"
 SRC_ROOT="${SELF_DIR}/files"
 
 if [[ ! -d "${TARGET_ROOT}" ]]; then
@@ -41,11 +41,13 @@ install_file() {
   echo "Installed: ${dst}"
 }
 
+backup_if_exists "root/terminal.xjs"
 backup_if_exists "root/terminal-iframe.html"
 backup_if_exists "root/js/terminal.js"
 backup_if_exists "root/js/flweb.js"
 backup_if_exists "root/api/flweb-assets.ssjs"
 
+install_file "root/terminal.xjs"
 install_file "root/terminal-iframe.html"
 install_file "root/js/terminal.js"
 install_file "root/js/flweb.js"
@@ -55,3 +57,6 @@ echo
 echo "ZZT web bridge install complete."
 echo "Backup saved to: ${backup_root}"
 echo "Target root: ${TARGET_ROOT}"
+echo
+echo "Multimedia terminal page available at:"
+echo "  http://<your-bbs-host>:<port>/terminal.xjs"
