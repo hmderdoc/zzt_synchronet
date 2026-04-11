@@ -14,11 +14,15 @@ namespace ZZT {
   export var SoundBuffer: string = "";
   export var SoundBufferPos: number = 0;
   export var SoundIsPlaying: boolean = false;
+  export var AnsiMusicMode: string = "AUTO";
+  export var AnsiMusicIntroducer: string = "|";
+  export var AnsiMusicForeground: boolean = false;
 
   var SoundFreqTable: number[] = [];
   var SoundTickLastMs: number = 0;
   var SoundBridgeState: number = 0; // 0 unknown, 1 available, -1 unavailable
   var SoundOutputActive: boolean = false;
+  var AnsiMusicActive: boolean = false;
   var WorldMusicTracks: WorldMusicTrack[] = [];
   var WorldMusicCurrentAssetPath: string = "";
 
@@ -68,6 +72,211 @@ namespace ZZT {
     }
 
     return false;
+  }
+
+  function soundTrimSpaces(value: string): string {
+    return String(value || "").replace(/^\s+/, "").replace(/\s+$/, "");
+  }
+
+  function normalizeAnsiMusicModeValue(mode: string): string {
+    var upper: string = soundTrimSpaces(mode).toUpperCase();
+    if (upper === "ON" || upper === "TRUE" || upper === "YES" || upper === "1") {
+      return "ON";
+    }
+    if (upper === "AUTO" || upper === "CTERM" || upper === "SYNCTERM") {
+      return "AUTO";
+    }
+    return "OFF";
+  }
+
+  function normalizeAnsiMusicIntroducerValue(introducer: string): string {
+    var upper: string = soundTrimSpaces(introducer).toUpperCase();
+    if (upper === "N" || upper === "CSI_N" || upper === "BANANSI" || upper === "BANSI") {
+      return "N";
+    }
+    if (upper === "M" || upper === "CSI_M" || upper === "DL") {
+      return "M";
+    }
+    if (upper === "|" || upper === "PIPE" || upper === "BAR" || upper === "CSI_PIPE") {
+      return "|";
+    }
+    return "|";
+  }
+
+  function normalizeAnsiMusicForegroundValue(value: string): boolean {
+    var upper: string = soundTrimSpaces(value).toUpperCase();
+    if (upper === "ON" || upper === "TRUE" || upper === "YES" || upper === "1" ||
+        upper === "FOREGROUND" || upper === "FG" || upper === "SYNC") {
+      return true;
+    }
+    return false;
+  }
+
+  function detectAnsiMusicSupportForTerminal(): boolean {
+    var ctermVersion: number;
+    if (typeof console === "undefined" ||
+        (typeof console.write !== "function" && typeof console.print !== "function")) {
+      return false;
+    }
+
+    if (AnsiMusicMode === "ON") {
+      return true;
+    }
+    if (AnsiMusicMode !== "AUTO") {
+      return false;
+    }
+
+    ctermVersion = (typeof console.cterm_version === "number" ? console.cterm_version : -1);
+    return ctermVersion >= 0;
+  }
+
+  function ansiMusicLengthFromDuration(durationCode: number): number {
+    var denom: number;
+    if (durationCode <= 0) {
+      return 32;
+    }
+    denom = Math.floor((32 + Math.floor(durationCode / 2)) / durationCode);
+    if (denom < 1) {
+      denom = 1;
+    }
+    if (denom > 64) {
+      denom = 64;
+    }
+    return denom;
+  }
+
+  function ansiMusicToneToken(tone: number): string {
+    switch (tone) {
+      case 0:
+        return "C";
+      case 1:
+        return "C#";
+      case 2:
+        return "D";
+      case 3:
+        return "D#";
+      case 4:
+        return "E";
+      case 5:
+        return "F";
+      case 6:
+        return "F#";
+      case 7:
+        return "G";
+      case 8:
+        return "G#";
+      case 9:
+        return "A";
+      case 10:
+        return "A#";
+      case 11:
+        return "B";
+      default:
+        return "";
+    }
+  }
+
+  function ansiMusicDrumToNoteCode(drumId: number): number {
+    var noteCodes: number[] = [0x20, 0x23, 0x27, 0x30, 0x34, 0x37, 0x40, 0x44, 0x47, 0x50];
+    var index: number = drumId % noteCodes.length;
+    if (index < 0) {
+      index += noteCodes.length;
+    }
+    return noteCodes[index];
+  }
+
+  function buildAnsiMusicFromPattern(pattern: string): string {
+    var tokens: string[] = [];
+    var i: number = 0;
+    var noteCode: number;
+    var durationCode: number;
+    var noteLength: number = 32;
+    var currentLength: number = 32;
+    var octave: number = 3;
+    var currentOctave: number = 3;
+    var tone: number;
+    var token: string;
+
+    if (pattern.length <= 1) {
+      return "";
+    }
+
+    tokens.push("T120");
+    tokens.push("O3");
+    tokens.push("L32");
+
+    while ((i + 1) < pattern.length) {
+      noteCode = toByteCode(pattern.charAt(i));
+      durationCode = toByteCode(pattern.charAt(i + 1));
+      i += 2;
+
+      noteLength = ansiMusicLengthFromDuration(durationCode);
+      if (noteLength !== currentLength) {
+        tokens.push("L" + String(noteLength));
+        currentLength = noteLength;
+      }
+
+      if (noteCode === 0) {
+        tokens.push("P");
+        continue;
+      }
+
+      if (noteCode >= 240) {
+        noteCode = ansiMusicDrumToNoteCode(noteCode - 240);
+      }
+
+      tone = noteCode % 16;
+      if (tone < 0 || tone > 11) {
+        tokens.push("P");
+        continue;
+      }
+
+      octave = Math.floor(noteCode / 16);
+      if (octave < 0) {
+        octave = 0;
+      }
+      if (octave > 6) {
+        octave = 6;
+      }
+
+      if (octave !== currentOctave) {
+        tokens.push("O" + String(octave));
+        currentOctave = octave;
+      }
+
+      token = ansiMusicToneToken(tone);
+      if (token.length <= 0) {
+        tokens.push("P");
+      } else {
+        tokens.push(token);
+      }
+    }
+
+    if (tokens.length <= 3) {
+      return "";
+    }
+    return tokens.join("");
+  }
+
+  function emitAnsiMusicFromPattern(pattern: string): void {
+    var prefix: string;
+    var intro: string;
+    var music: string;
+    if (!AnsiMusicActive || !SoundEnabled) {
+      return;
+    }
+
+    music = buildAnsiMusicFromPattern(pattern);
+    if (music.length <= 0) {
+      return;
+    }
+
+    intro = normalizeAnsiMusicIntroducerValue(AnsiMusicIntroducer);
+    prefix = "";
+    if (intro === "|" || intro === "M") {
+      prefix = (AnsiMusicForeground ? "F" : "B");
+    }
+    writeBridgeRaw("\x1b[" + intro + prefix + music + "\x0E");
   }
 
   function emitBridgePacket(action: string, payload: { [name: string]: unknown }): boolean {
@@ -719,6 +928,10 @@ namespace ZZT {
     SoundOutputActive = false;
     SoundTickLastMs = nowMs();
     SoundBridgeState = 0;
+    AnsiMusicMode = normalizeAnsiMusicModeValue(AnsiMusicMode);
+    AnsiMusicIntroducer = normalizeAnsiMusicIntroducerValue(AnsiMusicIntroducer);
+    AnsiMusicForeground = normalizeAnsiMusicForegroundValue(AnsiMusicForeground ? "ON" : "OFF");
+    AnsiMusicActive = detectAnsiMusicSupportForTerminal();
     WorldMusicTracks = [];
     WorldMusicCurrentAssetPath = "";
     // Probe once up front to avoid probing during gameplay input handling.
@@ -793,6 +1006,7 @@ namespace ZZT {
         }
       }
       SoundIsPlaying = true;
+      emitAnsiMusicFromPattern(pattern);
     }
   }
 

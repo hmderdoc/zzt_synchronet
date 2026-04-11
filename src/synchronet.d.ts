@@ -33,6 +33,7 @@ declare var console: {
   status?: number;
   ctrlkey_passthru?: number | string;
   aborted?: boolean;
+  cterm_version?: number;
   inkey?: (mode?: number, timeout?: number) => string;
   getkey?: (mode?: number) => string;
   getkeys?: (keys: string, max?: number, mode?: number) => string;

@@ -25,6 +25,40 @@ namespace ZZT {
     return trimmed;
   }
 
+  function normalizeAnsiMusicModeValue(value: string): string {
+    var upper: string = trimSpaces(value).toUpperCase();
+    if (upper === "ON" || upper === "TRUE" || upper === "YES" || upper === "1") {
+      return "ON";
+    }
+    if (upper === "AUTO" || upper === "CTERM" || upper === "SYNCTERM") {
+      return "AUTO";
+    }
+    return "OFF";
+  }
+
+  function normalizeAnsiMusicIntroducerValue(value: string): string {
+    var upper: string = trimSpaces(value).toUpperCase();
+    if (upper === "N" || upper === "CSI_N" || upper === "BANANSI" || upper === "BANSI") {
+      return "N";
+    }
+    if (upper === "M" || upper === "CSI_M" || upper === "DL") {
+      return "M";
+    }
+    if (upper === "|" || upper === "PIPE" || upper === "BAR" || upper === "CSI_PIPE") {
+      return "|";
+    }
+    return "|";
+  }
+
+  function normalizeAnsiMusicForegroundValue(value: string): boolean {
+    var upper: string = trimSpaces(value).toUpperCase();
+    if (upper === "ON" || upper === "TRUE" || upper === "YES" || upper === "1" ||
+        upper === "FOREGROUND" || upper === "FG" || upper === "SYNC") {
+      return true;
+    }
+    return false;
+  }
+
   function applyIniOverrides(): void {
     var lines: string[] = runtime.readTextFileLines(execPath("zzt.ini"));
     var i: number;
@@ -59,6 +93,12 @@ namespace ZZT {
         HighScoreBbsName = value;
       } else if (key === "SAVE_ROOT" || key === "SAVES_ROOT") {
         SaveRootPath = value;
+      } else if (key === "ANSI_MUSIC" || key === "ANSI_MUSIC_MODE") {
+        AnsiMusicMode = normalizeAnsiMusicModeValue(value);
+      } else if (key === "ANSI_MUSIC_INTRODUCER" || key === "ANSI_MUSIC_INTRO") {
+        AnsiMusicIntroducer = normalizeAnsiMusicIntroducerValue(value);
+      } else if (key === "ANSI_MUSIC_FOREGROUND" || key === "ANSI_MUSIC_SYNC") {
+        AnsiMusicForeground = normalizeAnsiMusicForegroundValue(value);
       }
     }
   }
@@ -124,6 +164,9 @@ namespace ZZT {
     HighScoreJsonPath = "";
     HighScoreBbsName = "";
     SaveRootPath = "";
+    AnsiMusicMode = "AUTO";
+    AnsiMusicIntroducer = "|";
+    AnsiMusicForeground = false;
     GameVersion = "3.2";
 
     var cfgLines = runtime.readTextFileLines(execPath("zzt.cfg"));

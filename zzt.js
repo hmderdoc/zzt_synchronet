@@ -2389,12 +2389,19 @@ var ZZT;
             return;
         }
         stat = ZZT.Board.Stats[statId];
+        if (stat.X < 0 || stat.X > ZZT.BOARD_WIDTH + 1 || stat.Y < 0 || stat.Y > ZZT.BOARD_HEIGHT + 1) {
+            return;
+        }
         if (ZZT.Board.Tiles[stat.X][stat.Y].Element !== ZZT.E_OBJECT) {
             return;
         }
         if (stat.StepX !== 0 || stat.StepY !== 0) {
             tx = stat.X + stat.StepX;
             ty = stat.Y + stat.StepY;
+            if (tx < 0 || tx > ZZT.BOARD_WIDTH + 1 || ty < 0 || ty > ZZT.BOARD_HEIGHT + 1) {
+                ZZT.OopSend(-statId, "THUD", false);
+                return;
+            }
             if (ZZT.ElementDefs[ZZT.Board.Tiles[tx][ty].Element].Walkable) {
                 ZZT.MoveStat(statId, tx, ty);
             }
@@ -2537,7 +2544,14 @@ var ZZT;
         }
     }
     function elementKeyTouch(x, y, _sourceStatId, _context) {
-        var key = ZZT.Board.Tiles[x][y].Color % 8;
+        var color = ZZT.Board.Tiles[x][y].Color;
+        var key = color % 8;
+        if (key === 0) {
+            key = Math.floor((color / 16) % 16);
+            if (key >= 8) {
+                key = 0;
+            }
+        }
         if (key < 1 || key > 7) {
             return;
         }
@@ -2580,7 +2594,14 @@ var ZZT;
         context.DeltaY = 0;
     }
     function elementDoorTouch(x, y, _sourceStatId, _context) {
-        var key = Math.floor((ZZT.Board.Tiles[x][y].Color / 16) % 8);
+        var color = ZZT.Board.Tiles[x][y].Color;
+        var key = Math.floor((color / 16) % 8);
+        if (key === 0) {
+            key = color % 16;
+            if (key >= 8) {
+                key = 0;
+            }
+        }
         if (key < 1 || key > 7) {
             return;
         }
@@ -3461,10 +3482,14 @@ var ZZT;
     ZZT.SoundBuffer = "";
     ZZT.SoundBufferPos = 0;
     ZZT.SoundIsPlaying = false;
+    ZZT.AnsiMusicMode = "AUTO";
+    ZZT.AnsiMusicIntroducer = "|";
+    ZZT.AnsiMusicForeground = false;
     var SoundFreqTable = [];
     var SoundTickLastMs = 0;
     var SoundBridgeState = 0; // 0 unknown, 1 available, -1 unavailable
     var SoundOutputActive = false;
+    var AnsiMusicActive = false;
     var WorldMusicTracks = [];
     var WorldMusicCurrentAssetPath = "";
     function nowMs() {
@@ -3503,6 +3528,187 @@ var ZZT;
             return false;
         }
         return false;
+    }
+    function soundTrimSpaces(value) {
+        return String(value || "").replace(/^\s+/, "").replace(/\s+$/, "");
+    }
+    function normalizeAnsiMusicModeValue(mode) {
+        var upper = soundTrimSpaces(mode).toUpperCase();
+        if (upper === "ON" || upper === "TRUE" || upper === "YES" || upper === "1") {
+            return "ON";
+        }
+        if (upper === "AUTO" || upper === "CTERM" || upper === "SYNCTERM") {
+            return "AUTO";
+        }
+        return "OFF";
+    }
+    function normalizeAnsiMusicIntroducerValue(introducer) {
+        var upper = soundTrimSpaces(introducer).toUpperCase();
+        if (upper === "N" || upper === "CSI_N" || upper === "BANANSI" || upper === "BANSI") {
+            return "N";
+        }
+        if (upper === "M" || upper === "CSI_M" || upper === "DL") {
+            return "M";
+        }
+        if (upper === "|" || upper === "PIPE" || upper === "BAR" || upper === "CSI_PIPE") {
+            return "|";
+        }
+        return "|";
+    }
+    function normalizeAnsiMusicForegroundValue(value) {
+        var upper = soundTrimSpaces(value).toUpperCase();
+        if (upper === "ON" || upper === "TRUE" || upper === "YES" || upper === "1" ||
+            upper === "FOREGROUND" || upper === "FG" || upper === "SYNC") {
+            return true;
+        }
+        return false;
+    }
+    function detectAnsiMusicSupportForTerminal() {
+        var ctermVersion;
+        if (typeof console === "undefined" ||
+            (typeof console.write !== "function" && typeof console.print !== "function")) {
+            return false;
+        }
+        if (ZZT.AnsiMusicMode === "ON") {
+            return true;
+        }
+        if (ZZT.AnsiMusicMode !== "AUTO") {
+            return false;
+        }
+        ctermVersion = (typeof console.cterm_version === "number" ? console.cterm_version : -1);
+        return ctermVersion >= 0;
+    }
+    function ansiMusicLengthFromDuration(durationCode) {
+        var denom;
+        if (durationCode <= 0) {
+            return 32;
+        }
+        denom = Math.floor((32 + Math.floor(durationCode / 2)) / durationCode);
+        if (denom < 1) {
+            denom = 1;
+        }
+        if (denom > 64) {
+            denom = 64;
+        }
+        return denom;
+    }
+    function ansiMusicToneToken(tone) {
+        switch (tone) {
+            case 0:
+                return "C";
+            case 1:
+                return "C#";
+            case 2:
+                return "D";
+            case 3:
+                return "D#";
+            case 4:
+                return "E";
+            case 5:
+                return "F";
+            case 6:
+                return "F#";
+            case 7:
+                return "G";
+            case 8:
+                return "G#";
+            case 9:
+                return "A";
+            case 10:
+                return "A#";
+            case 11:
+                return "B";
+            default:
+                return "";
+        }
+    }
+    function ansiMusicDrumToNoteCode(drumId) {
+        var noteCodes = [0x20, 0x23, 0x27, 0x30, 0x34, 0x37, 0x40, 0x44, 0x47, 0x50];
+        var index = drumId % noteCodes.length;
+        if (index < 0) {
+            index += noteCodes.length;
+        }
+        return noteCodes[index];
+    }
+    function buildAnsiMusicFromPattern(pattern) {
+        var tokens = [];
+        var i = 0;
+        var noteCode;
+        var durationCode;
+        var noteLength = 32;
+        var currentLength = 32;
+        var octave = 3;
+        var currentOctave = 3;
+        var tone;
+        var token;
+        if (pattern.length <= 1) {
+            return "";
+        }
+        tokens.push("T120");
+        tokens.push("O3");
+        tokens.push("L32");
+        while ((i + 1) < pattern.length) {
+            noteCode = toByteCode(pattern.charAt(i));
+            durationCode = toByteCode(pattern.charAt(i + 1));
+            i += 2;
+            noteLength = ansiMusicLengthFromDuration(durationCode);
+            if (noteLength !== currentLength) {
+                tokens.push("L" + String(noteLength));
+                currentLength = noteLength;
+            }
+            if (noteCode === 0) {
+                tokens.push("P");
+                continue;
+            }
+            if (noteCode >= 240) {
+                noteCode = ansiMusicDrumToNoteCode(noteCode - 240);
+            }
+            tone = noteCode % 16;
+            if (tone < 0 || tone > 11) {
+                tokens.push("P");
+                continue;
+            }
+            octave = Math.floor(noteCode / 16);
+            if (octave < 0) {
+                octave = 0;
+            }
+            if (octave > 6) {
+                octave = 6;
+            }
+            if (octave !== currentOctave) {
+                tokens.push("O" + String(octave));
+                currentOctave = octave;
+            }
+            token = ansiMusicToneToken(tone);
+            if (token.length <= 0) {
+                tokens.push("P");
+            }
+            else {
+                tokens.push(token);
+            }
+        }
+        if (tokens.length <= 3) {
+            return "";
+        }
+        return tokens.join("");
+    }
+    function emitAnsiMusicFromPattern(pattern) {
+        var prefix;
+        var intro;
+        var music;
+        if (!AnsiMusicActive || !ZZT.SoundEnabled) {
+            return;
+        }
+        music = buildAnsiMusicFromPattern(pattern);
+        if (music.length <= 0) {
+            return;
+        }
+        intro = normalizeAnsiMusicIntroducerValue(ZZT.AnsiMusicIntroducer);
+        prefix = "";
+        if (intro === "|" || intro === "M") {
+            prefix = (ZZT.AnsiMusicForeground ? "F" : "B");
+        }
+        writeBridgeRaw("\x1b[" + intro + prefix + music + "\x0E");
     }
     function emitBridgePacket(action, payload) {
         var packet = {};
@@ -4078,6 +4284,10 @@ var ZZT;
         SoundOutputActive = false;
         SoundTickLastMs = nowMs();
         SoundBridgeState = 0;
+        ZZT.AnsiMusicMode = normalizeAnsiMusicModeValue(ZZT.AnsiMusicMode);
+        ZZT.AnsiMusicIntroducer = normalizeAnsiMusicIntroducerValue(ZZT.AnsiMusicIntroducer);
+        ZZT.AnsiMusicForeground = normalizeAnsiMusicForegroundValue(ZZT.AnsiMusicForeground ? "ON" : "OFF");
+        AnsiMusicActive = detectAnsiMusicSupportForTerminal();
         WorldMusicTracks = [];
         WorldMusicCurrentAssetPath = "";
         // Probe once up front to avoid probing during gameplay input handling.
@@ -4147,6 +4357,7 @@ var ZZT;
                 }
             }
             ZZT.SoundIsPlaying = true;
+            emitAnsiMusicFromPattern(pattern);
         }
     }
     ZZT.SoundQueue = SoundQueue;
@@ -10001,12 +10212,42 @@ var ZZT;
         var oldBoard = ZZT.World.Info.CurrentBoard;
         var col = ZZT.Board.Tiles[x][y].Color;
         var passageStat = GetStatIdAt(x, y);
+        var fallbackPassageStat = -1;
         var ix;
         var iy;
+        var sx;
+        var sy;
         var newX = 0;
         var newY = 0;
         if (passageStat < 0) {
-            return;
+            for (ix = 1; ix <= ZZT.Board.StatCount; ix += 1) {
+                sx = ZZT.Board.Stats[ix].X;
+                sy = ZZT.Board.Stats[ix].Y;
+                if (sx < 0 || sx > ZZT.BOARD_WIDTH + 1 || sy < 0 || sy > ZZT.BOARD_HEIGHT + 1) {
+                    continue;
+                }
+                if (ZZT.Board.Tiles[sx][sy].Element !== ZZT.E_PASSAGE) {
+                    continue;
+                }
+                if (sx === x && sy === y) {
+                    passageStat = ix;
+                    break;
+                }
+                if (ZZT.Board.Tiles[sx][sy].Color === col) {
+                    if (fallbackPassageStat < 0) {
+                        fallbackPassageStat = ix;
+                    }
+                    else {
+                        fallbackPassageStat = -2;
+                    }
+                }
+            }
+            if (passageStat < 0 && fallbackPassageStat >= 0) {
+                passageStat = fallbackPassageStat;
+            }
+            if (passageStat < 0) {
+                return;
+            }
         }
         BoardChange(ZZT.Board.Stats[passageStat].P3);
         for (ix = 1; ix <= ZZT.BOARD_WIDTH; ix += 1) {
@@ -10478,6 +10719,37 @@ var ZZT;
         }
         return trimmed;
     }
+    function normalizeAnsiMusicModeValue(value) {
+        var upper = trimSpaces(value).toUpperCase();
+        if (upper === "ON" || upper === "TRUE" || upper === "YES" || upper === "1") {
+            return "ON";
+        }
+        if (upper === "AUTO" || upper === "CTERM" || upper === "SYNCTERM") {
+            return "AUTO";
+        }
+        return "OFF";
+    }
+    function normalizeAnsiMusicIntroducerValue(value) {
+        var upper = trimSpaces(value).toUpperCase();
+        if (upper === "N" || upper === "CSI_N" || upper === "BANANSI" || upper === "BANSI") {
+            return "N";
+        }
+        if (upper === "M" || upper === "CSI_M" || upper === "DL") {
+            return "M";
+        }
+        if (upper === "|" || upper === "PIPE" || upper === "BAR" || upper === "CSI_PIPE") {
+            return "|";
+        }
+        return "|";
+    }
+    function normalizeAnsiMusicForegroundValue(value) {
+        var upper = trimSpaces(value).toUpperCase();
+        if (upper === "ON" || upper === "TRUE" || upper === "YES" || upper === "1" ||
+            upper === "FOREGROUND" || upper === "FG" || upper === "SYNC") {
+            return true;
+        }
+        return false;
+    }
     function applyIniOverrides() {
         var lines = ZZT.runtime.readTextFileLines(ZZT.execPath("zzt.ini"));
         var i;
@@ -10510,6 +10782,15 @@ var ZZT;
             }
             else if (key === "SAVE_ROOT" || key === "SAVES_ROOT") {
                 ZZT.SaveRootPath = value;
+            }
+            else if (key === "ANSI_MUSIC" || key === "ANSI_MUSIC_MODE") {
+                ZZT.AnsiMusicMode = normalizeAnsiMusicModeValue(value);
+            }
+            else if (key === "ANSI_MUSIC_INTRODUCER" || key === "ANSI_MUSIC_INTRO") {
+                ZZT.AnsiMusicIntroducer = normalizeAnsiMusicIntroducerValue(value);
+            }
+            else if (key === "ANSI_MUSIC_FOREGROUND" || key === "ANSI_MUSIC_SYNC") {
+                ZZT.AnsiMusicForeground = normalizeAnsiMusicForegroundValue(value);
             }
         }
     }
@@ -10569,6 +10850,9 @@ var ZZT;
         ZZT.HighScoreJsonPath = "";
         ZZT.HighScoreBbsName = "";
         ZZT.SaveRootPath = "";
+        ZZT.AnsiMusicMode = "AUTO";
+        ZZT.AnsiMusicIntroducer = "|";
+        ZZT.AnsiMusicForeground = false;
         ZZT.GameVersion = "3.2";
         var cfgLines = ZZT.runtime.readTextFileLines(ZZT.execPath("zzt.cfg"));
         if (cfgLines.length > 0) {

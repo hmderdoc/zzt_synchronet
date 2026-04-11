@@ -4567,13 +4567,43 @@ namespace ZZT {
     var oldBoard: number = World.Info.CurrentBoard;
     var col: number = Board.Tiles[x][y].Color;
     var passageStat: number = GetStatIdAt(x, y);
+    var fallbackPassageStat: number = -1;
     var ix: number;
     var iy: number;
+    var sx: number;
+    var sy: number;
     var newX: number = 0;
     var newY: number = 0;
 
     if (passageStat < 0) {
-      return;
+      for (ix = 1; ix <= Board.StatCount; ix += 1) {
+        sx = Board.Stats[ix].X;
+        sy = Board.Stats[ix].Y;
+        if (sx < 0 || sx > BOARD_WIDTH + 1 || sy < 0 || sy > BOARD_HEIGHT + 1) {
+          continue;
+        }
+        if (Board.Tiles[sx][sy].Element !== E_PASSAGE) {
+          continue;
+        }
+        if (sx === x && sy === y) {
+          passageStat = ix;
+          break;
+        }
+        if (Board.Tiles[sx][sy].Color === col) {
+          if (fallbackPassageStat < 0) {
+            fallbackPassageStat = ix;
+          } else {
+            fallbackPassageStat = -2;
+          }
+        }
+      }
+
+      if (passageStat < 0 && fallbackPassageStat >= 0) {
+        passageStat = fallbackPassageStat;
+      }
+      if (passageStat < 0) {
+        return;
+      }
     }
 
     BoardChange(Board.Stats[passageStat].P3);

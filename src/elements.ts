@@ -768,6 +768,9 @@ namespace ZZT {
     }
 
     stat = Board.Stats[statId];
+    if (stat.X < 0 || stat.X > BOARD_WIDTH + 1 || stat.Y < 0 || stat.Y > BOARD_HEIGHT + 1) {
+      return;
+    }
     if (Board.Tiles[stat.X][stat.Y].Element !== E_OBJECT) {
       return;
     }
@@ -775,6 +778,10 @@ namespace ZZT {
     if (stat.StepX !== 0 || stat.StepY !== 0) {
       tx = stat.X + stat.StepX;
       ty = stat.Y + stat.StepY;
+      if (tx < 0 || tx > BOARD_WIDTH + 1 || ty < 0 || ty > BOARD_HEIGHT + 1) {
+        OopSend(-statId, "THUD", false);
+        return;
+      }
       if (ElementDefs[Board.Tiles[tx][ty].Element].Walkable) {
         MoveStat(statId, tx, ty);
       } else {
@@ -933,7 +940,14 @@ namespace ZZT {
   }
 
   function elementKeyTouch(x: number, y: number, _sourceStatId: number, _context: TouchContext): void {
-    var key: number = Board.Tiles[x][y].Color % 8;
+    var color: number = Board.Tiles[x][y].Color;
+    var key: number = color % 8;
+    if (key === 0) {
+      key = Math.floor((color / 16) % 16);
+      if (key >= 8) {
+        key = 0;
+      }
+    }
     if (key < 1 || key > 7) {
       return;
     }
@@ -982,7 +996,14 @@ namespace ZZT {
   }
 
   function elementDoorTouch(x: number, y: number, _sourceStatId: number, _context: TouchContext): void {
-    var key: number = Math.floor((Board.Tiles[x][y].Color / 16) % 8);
+    var color: number = Board.Tiles[x][y].Color;
+    var key: number = Math.floor((color / 16) % 8);
+    if (key === 0) {
+      key = color % 16;
+      if (key >= 8) {
+        key = 0;
+      }
+    }
     if (key < 1 || key > 7) {
       return;
     }

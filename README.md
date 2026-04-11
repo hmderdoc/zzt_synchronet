@@ -96,9 +96,31 @@ Create `/sbbs/xtrn/zzt/ZZT.INI` (or `zzt.ini`) to override defaults:
 HIGH_SCORE_JSON=/path/to/shared/highscores.json
 HIGH_SCORE_BBS=My BBS Name
 SAVE_ROOT=/path/to/save/root
+ANSI_MUSIC=AUTO
+ANSI_MUSIC_INTRODUCER=PIPE
+ANSI_MUSIC_FOREGROUND=OFF
 ```
 
 `HIGH_SCORE_JSON` can point to a shared path for inter-BBS score syncing.
+
+`ANSI_MUSIC` values:
+
+- `AUTO` (default): emit only when a CTerm-compatible client is detected (`console.cterm_version` present, e.g. SyncTERM).
+- `OFF`: never emit ANSI music escapes.
+- `ON`: always emit ANSI music escapes.
+
+`ANSI_MUSIC_INTRODUCER` values:
+
+- `PIPE` (default): emits `CSI |` ANSI music introducer.
+- `N`: emits `CSI N` introducer for legacy compatibility.
+- `M`: emits `CSI M` introducer for legacy ANSI-music clients.
+
+`ANSI_MUSIC_FOREGROUND` values:
+
+- `OFF` (default): emit background ANSI music (`B` mode for `CSI |`/`CSI M`) to avoid blocking gameplay.
+- `ON`: emit foreground ANSI music (`F` mode), which may block until notes complete.
+
+ANSI music is emitted for queued ZZT sound patterns (including OOP `#PLAY` and built-in sound effects). Keep this in `AUTO` unless your terminal/client mix requires a forced mode.
 
 ## Help Resource Data (`ZZT.DAT`)
 
@@ -133,5 +155,6 @@ The unregistered shutdown message (`END1.MSG` .. `END4.MSG`) is also read from p
 - Board switching (`B`) and board info (`I`) now use text-window driven selection/edit flows (max shots, darkness, neighbors, re-enter flag, time limit) closer to Pascal behavior.
 - Editor sidebar visuals are now closer to Pascal layout (pattern/color bars, active pointers, color name, copied-tile preview).
 - Sound runtime supports ZZT note/drum playback via the FLWEB bridge.
+- Optional ANSI music emission for OOP `#PLAY` is available via `ZZT.INI`.
 - Optional world-pack `.mp3` files are detected and staged for web playback from `mods/flweb/assets/zzt_worlds/...` when available.
 - Remaining work is parity refinement (behavior/timing/UI edge cases), not first-pass unit bring-up.
