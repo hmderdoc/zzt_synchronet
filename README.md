@@ -1,14 +1,26 @@
 # ZZT Synchronet TypeScript Port
 
-This directory is the new TypeScript-based Synchronet JavaScript port target for the Pascal sources in `reconstruction-of-zzt-master/SRC`.
+This directory is the new TypeScript-based Synchronet JavaScript port target for the Pascal sources in[ `[reconstruction-of-zzt-master/SRC](https://github.com/asiekierka/reconstruction-of-zzt/)`](https://github.com/asiekierka/reconstruction-of-zzt/).
+
+## How to run.
+
+You can use the synchronet auto-installer with this game, it should pick it up.  There is also an optional web package that has an install script which enhances the gameplay with sound - read on for more details.  
+
+The door is compiled to a single javascript file `zzt.js` this is the door to be configured in SCFG to launch.
+
+There is also a `zzt_files` directory, acquire .zzt files (games) and place them in this directory or subdirectories of your design to be able to load them in the door.  A small set of games from the origina release is bundled, but there are literally thousands out there.
+
+It also contains a `web` directory with a custom fTelnet implementation which allows full sound support for zzt if you play it in that terminal, see the `web` directory for more info.  Pretty cool multimedia, definitely the best way to play.
 
 ## Layout
 
+- `zzt.js`: Generated runtime script for Synchronet. *This is the door game to run / configure in SCFG
+- `zzt_files/`: Preferred drop-in location for external `.ZZT` worlds (supports one subdirectory level for packs).
+- `web/`: Files and scripts to add custom fTelnet page supporting sounds for zzt
+#### Project Files
 - `src/`: TypeScript source files for the port.
 - `build.js`: Build runner that locates a local TypeScript compiler.
 - `tsconfig.json`: Compiles all `src/*.ts` files into one SpiderMonkey-friendly script.
-- `zzt.js`: Generated runtime script for Synchronet.
-- `zzt_files/`: Preferred drop-in location for external `.ZZT` worlds (supports one subdirectory level for packs).
 
 ## Build
 
