@@ -10,7 +10,7 @@ The door is compiled to a single javascript file `zzt.js` this is the door to be
 
 There is also a `zzt_files` directory, acquire .zzt files (games) and place them in this directory or subdirectories of your design to be able to load them in the door.  A small set of games from the origina release is bundled, but there are literally thousands out there.
 
-It also contains a `web` directory with a custom fTelnet implementation which allows full sound support for zzt if you play it in that terminal, see the `web` directory for more info.  Pretty cool multimedia, definitely the best way to play.
+It also contains a `web` directory with a custom fTelnet implementation which allows full sound support for zzt if you play it in that terminal, see the `web` directory for more info.  Pretty cool multimedia, definitely the best way to play. *IF YOU WANT THIS ENABLED, YOU MUST RUN THE INSTALL SCRIPT FROM `web` directory*
 
 ## Layout
 
