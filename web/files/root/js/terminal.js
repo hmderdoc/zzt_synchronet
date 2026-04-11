@@ -100,7 +100,7 @@
     }
 
     function loadBridgeConfig() {
-        return fetchJson('./api/terminal-ui-config.ssjs')
+        return fetchJson('./api/terminal-ui-config.ssjs?_=' + Date.now())
             .then(function (res) {
                 var opts = res && res.options ? res.options : res;
                 bridgeConfig = normalizeBridgeConfig(opts || BRIDGE_CONFIG_DEFAULTS);

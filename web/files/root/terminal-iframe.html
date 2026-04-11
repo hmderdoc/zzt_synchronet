@@ -15,16 +15,33 @@
         overflow: hidden;
         background: #000;
     }
+    body.terminal-locked {
+        display: block;
+        padding: 16px;
+        background: #000;
+    }
     .fTelnetContainer {
         width: 100%;
         height: calc(100% - var(--mi-bottom-reserved));
         overflow: hidden;
         position: relative;
     }
+    body.terminal-locked .fTelnetContainer {
+        width: auto;
+        height: auto;
+        max-width: none;
+        max-height: none;
+        border: 1px solid rgba(120, 120, 120, 0.45);
+        background: #000;
+    }
     .fTelnetClientContainer {
         width: 100% !important;
         height: 100% !important;
         overflow: hidden !important;
+    }
+    body.terminal-locked .fTelnetClientContainer {
+        width: auto !important;
+        height: auto !important;
     }
     canvas {
         display: block;
@@ -146,6 +163,73 @@
         MIN_ROWS = BRIDGE_OPTIONS.minRows;
         MAX_COLS = BRIDGE_OPTIONS.maxColumns;
         MAX_ROWS = BRIDGE_OPTIONS.maxRows;
+        updateLockedLayout(currentSize);
+    }
+
+    function updateLockedLayout(size) {
+        var container = document.getElementById('fTelnetContainer');
+        var clientContainer = document.querySelector('.fTelnetClientContainer');
+        var canvas = document.querySelector('#fTelnetContainer canvas');
+        var width;
+        var height;
+        var offsetTop = 0;
+
+        document.body.classList.toggle('terminal-locked', BRIDGE_OPTIONS.lockScreenSize);
+
+        if (!container) return;
+        if (!BRIDGE_OPTIONS.lockScreenSize) {
+            container.style.width = '';
+            container.style.height = '';
+            if (clientContainer) {
+                clientContainer.style.width = '';
+                clientContainer.style.height = '';
+            }
+            return;
+        }
+
+        width = size ? size.columns * size.fontW : BRIDGE_OPTIONS.columns * 8;
+        height = size ? size.rows * size.fontH : BRIDGE_OPTIONS.rows * 16;
+
+        container.style.width = width + 'px';
+        container.style.height = height + 'px';
+        if (clientContainer) {
+            clientContainer.style.width = width + 'px';
+            clientContainer.style.height = height + 'px';
+        }
+        if (canvas) {
+            if (canvas.height > height) {
+                offsetTop = height - canvas.height;
+            }
+            canvas.style.width = '';
+            canvas.style.height = '';
+            canvas.style.marginLeft = '0';
+            canvas.style.marginTop = offsetTop + 'px';
+        }
+    }
+
+    function applyClientScreenSize(size) {
+        if (!client || !size) return;
+        currentSize = size;
+        currentColumns = size.columns;
+        currentRows = size.rows;
+
+        if (client.Options) {
+            client.Options.ScreenColumns = currentColumns;
+            client.Options.ScreenRows = currentRows;
+        }
+        if (client._Options) {
+            client._Options.ScreenColumns = currentColumns;
+            client._Options.ScreenRows = currentRows;
+        }
+        if (client._Crt && typeof client._Crt.SetScreenSize === 'function') {
+            client._Crt.SetScreenSize(currentColumns, currentRows);
+        }
+        updateLockedLayout(size);
+    }
+
+    function syncLockedScreenSize() {
+        if (!BRIDGE_OPTIONS.lockScreenSize) return;
+        applyClientScreenSize(getScreenSize());
     }
 
     function getScreenSize() {
@@ -876,6 +960,7 @@
             canvas.style.width = '';
             canvas.style.height = '';
             canvas.style.marginLeft = '0';
+            updateLockedLayout(size);
             repositionMobileControls();
             return;
         }
@@ -905,6 +990,7 @@
         [100, 500, 1200].forEach(function (ms) {
             setTimeout(function () {
                 if (!client || !client._Crt) return;
+                syncLockedScreenSize();
                 var cc = document.querySelector('.fTelnetClientContainer');
                 if (cc) {
                     cc.style.width = '';
@@ -916,6 +1002,8 @@
                     client._Crt.SetFont(client._Crt.Font
                         ? client._Crt.Font.Name : 'CP437');
                 }
+                syncLockedScreenSize();
+                updateLockedLayout(currentSize);
                 scrollToBottom();
                 applyCanvasScale(currentSize);
             }, ms);
@@ -985,8 +1073,10 @@
             sendToParent({ type: 'error', message: 'fTelnet init: ' + err.message });
             return;
         }
+        syncLockedScreenSize();
         window._ftClient = client;
         installTerminalUiBridge();
+        updateLockedLayout(currentSize);
 
         if (BRIDGE_OPTIONS.enableRenderSpeedPatch) {
         /* ── Render-speed fix v3 ────────────────────────────────────
@@ -1403,6 +1493,7 @@
 
             case 'resize':
                 if (!client || !client._Crt) break;
+                syncLockedScreenSize();
                 var cc = document.querySelector('.fTelnetClientContainer');
                 if (cc) {
                     cc.style.width = '';
@@ -1413,26 +1504,25 @@
                     client._Crt.SetFont(client._Crt.Font
                         ? client._Crt.Font.Name : 'CP437');
                 }
+                syncLockedScreenSize();
                 scrollToBottom();
                 if (!BRIDGE_OPTIONS.lockScreenSize) {
                     var newSize = getScreenSize();
-                    currentSize = newSize;
                     if (isConnected &&
                         (newSize.columns !== currentColumns ||
                          newSize.rows !== currentRows)) {
-                        currentColumns = newSize.columns;
-                        currentRows = newSize.rows;
-                        if (typeof client._Crt.SetScreenSize === 'function') {
-                            client._Crt.SetScreenSize(currentColumns, currentRows);
-                        }
+                        applyClientScreenSize(newSize);
                         if (typeof client._Crt.SetFont === 'function') {
                             client._Crt.SetFont(client._Crt.Font
                                 ? client._Crt.Font.Name : 'CP437');
                         }
+                    } else {
+                        currentSize = newSize;
                     }
                 }
                 scrollToBottom();
                 setTimeout(function () { applyCanvasScale(currentSize); }, 200);
+                setTimeout(function () { updateLockedLayout(currentSize); }, 220);
                 setTimeout(repositionMobileControls, 250);
                 break;
 

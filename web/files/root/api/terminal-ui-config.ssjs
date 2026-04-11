@@ -85,10 +85,11 @@ function normalizeOptions(raw)
 function getIniPath()
 {
 	var candidates = [
-		fullpath(backslash(js.exec_dir + '../terminal-ui.ini')),
-		fullpath(backslash(js.exec_dir + '../TERMINAL-UI.INI'))
+		fullpath(js.exec_dir + '../terminal-ui.ini'),
+		fullpath(js.exec_dir + '../TERMINAL-UI.INI')
 	];
 	for (var i = 0; i < candidates.length; i += 1) {
+		candidates[i] = String(candidates[i]).replace(/[\\\/]+$/, '');
 		if (file_exists(candidates[i]))
 			return candidates[i];
 	}
@@ -148,7 +149,9 @@ try {
 }
 
 http_reply.header['Content-Type'] = 'application/json; charset=utf-8';
-http_reply.header['Cache-Control'] = 'private, max-age=60';
+http_reply.header['Cache-Control'] = 'no-store, no-cache, must-revalidate';
+http_reply.header['Pragma'] = 'no-cache';
+http_reply.header['Expires'] = '0';
 write(JSON.stringify({
 	ok: true,
 	loaded: loaded,
