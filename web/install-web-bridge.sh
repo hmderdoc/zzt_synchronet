@@ -46,12 +46,16 @@ backup_if_exists "root/terminal-iframe.html"
 backup_if_exists "root/js/terminal.js"
 backup_if_exists "root/js/flweb.js"
 backup_if_exists "root/api/flweb-assets.ssjs"
+backup_if_exists "root/api/terminal-ui-config.ssjs"
+backup_if_exists "root/terminal-ui.ini"
 
 install_file "root/terminal.xjs"
 install_file "root/terminal-iframe.html"
 install_file "root/js/terminal.js"
 install_file "root/js/flweb.js"
 install_file "root/api/flweb-assets.ssjs"
+install_file "root/api/terminal-ui-config.ssjs"
+install_file "root/terminal-ui.ini"
 
 echo
 echo "ZZT web bridge install complete."

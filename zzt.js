@@ -10111,9 +10111,9 @@ var ZZT;
         SidebarClearLine(0);
         SidebarClearLine(1);
         SidebarClearLine(2);
-        ZZT.VideoWriteText(61, 0, 0x1f, "    - - - - -      ");
+        ZZT.VideoWriteText(61, 0, 0x1f, "    - - - - -     ");
         ZZT.VideoWriteText(62, 1, 0x70, "      ZZT      ");
-        ZZT.VideoWriteText(61, 2, 0x1f, "    - - - - -      ");
+        ZZT.VideoWriteText(61, 2, 0x1f, "    - - - - -     ");
         if (ZZT.GameStateElement === ZZT.E_PLAYER) {
             ZZT.VideoWriteText(64, 7, 0x1e, " Health:");
             ZZT.VideoWriteText(64, 8, 0x1e, "   Ammo:");

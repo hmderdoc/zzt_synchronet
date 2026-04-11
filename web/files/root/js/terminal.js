@@ -9,6 +9,20 @@
 
     var cfg = window.sbbsConfig;
     if (!cfg.ftelnet) return;
+    var BRIDGE_CONFIG_DEFAULTS = {
+        lockScreenSize: false,
+        columns: 80,
+        rows: 25,
+        minColumns: 80,
+        maxColumns: 160,
+        minRows: 24,
+        maxRows: 60,
+        enableTouchHandlers: true,
+        enableWheelArrows: true,
+        enableRenderSpeedPatch: true,
+        enableParentAudioUnlockBridge: true,
+        enableCanvasScale: true
+    };
 
     var panel = document.getElementById('terminal-panel');
     var iframeContainer = document.getElementById('terminal-iframe-container');
@@ -26,6 +40,77 @@
     var isSecure = location.protocol === 'https:';
     var resizeTimer = null;
     var restoreTimer = null;
+    var bridgeConfig = normalizeBridgeConfig(BRIDGE_CONFIG_DEFAULTS);
+    var bridgeConfigPromise = loadBridgeConfig();
+
+    function toInt(value, fallback, min, max) {
+        var parsed = parseInt(value, 10);
+        if (!isFinite(parsed) || isNaN(parsed)) parsed = fallback;
+        if (isFinite(min) && parsed < min) parsed = min;
+        if (isFinite(max) && parsed > max) parsed = max;
+        return parsed;
+    }
+
+    function toBool(value, fallback) {
+        if (value === true || value === false) return value;
+        if (typeof value === 'number') return value !== 0;
+        if (typeof value === 'string') {
+            var lowered = value.toLowerCase();
+            if (lowered === '1' || lowered === 'true' || lowered === 'yes' || lowered === 'on')
+                return true;
+            if (lowered === '0' || lowered === 'false' || lowered === 'no' || lowered === 'off')
+                return false;
+        }
+        return fallback;
+    }
+
+    function normalizeBridgeConfig(input) {
+        var src = input || {};
+        var out = {};
+        out.lockScreenSize = toBool(src.lockScreenSize, BRIDGE_CONFIG_DEFAULTS.lockScreenSize);
+        out.columns = toInt(src.columns, BRIDGE_CONFIG_DEFAULTS.columns, 40, 240);
+        out.rows = toInt(src.rows, BRIDGE_CONFIG_DEFAULTS.rows, 15, 120);
+        out.minColumns = toInt(src.minColumns, BRIDGE_CONFIG_DEFAULTS.minColumns, 40, 240);
+        out.maxColumns = toInt(src.maxColumns, BRIDGE_CONFIG_DEFAULTS.maxColumns, 40, 240);
+        out.minRows = toInt(src.minRows, BRIDGE_CONFIG_DEFAULTS.minRows, 15, 120);
+        out.maxRows = toInt(src.maxRows, BRIDGE_CONFIG_DEFAULTS.maxRows, 15, 120);
+        out.enableTouchHandlers = toBool(src.enableTouchHandlers, BRIDGE_CONFIG_DEFAULTS.enableTouchHandlers);
+        out.enableWheelArrows = toBool(src.enableWheelArrows, BRIDGE_CONFIG_DEFAULTS.enableWheelArrows);
+        out.enableRenderSpeedPatch = toBool(src.enableRenderSpeedPatch, BRIDGE_CONFIG_DEFAULTS.enableRenderSpeedPatch);
+        out.enableParentAudioUnlockBridge = toBool(
+            src.enableParentAudioUnlockBridge,
+            BRIDGE_CONFIG_DEFAULTS.enableParentAudioUnlockBridge
+        );
+        out.enableCanvasScale = toBool(src.enableCanvasScale, BRIDGE_CONFIG_DEFAULTS.enableCanvasScale);
+
+        if (out.minColumns > out.maxColumns) out.minColumns = out.maxColumns;
+        if (out.minRows > out.maxRows) out.minRows = out.maxRows;
+        if (out.columns < out.minColumns) out.columns = out.minColumns;
+        if (out.columns > out.maxColumns) out.columns = out.maxColumns;
+        if (out.rows < out.minRows) out.rows = out.minRows;
+        if (out.rows > out.maxRows) out.rows = out.maxRows;
+        return out;
+    }
+
+    function fetchJson(url) {
+        if (typeof window.v4_get === 'function') {
+            return window.v4_get(url);
+        }
+        return fetch(url).then(function (response) { return response.json(); });
+    }
+
+    function loadBridgeConfig() {
+        return fetchJson('./api/terminal-ui-config.ssjs')
+            .then(function (res) {
+                var opts = res && res.options ? res.options : res;
+                bridgeConfig = normalizeBridgeConfig(opts || BRIDGE_CONFIG_DEFAULTS);
+                return bridgeConfig;
+            })
+            .catch(function () {
+                bridgeConfig = normalizeBridgeConfig(BRIDGE_CONFIG_DEFAULTS);
+                return bridgeConfig;
+            });
+    }
 
     /* ============================================================
      *  Responsive screen size calculation
@@ -87,12 +172,12 @@
         clearTimeout(restoreTimer);
         afterNextPaint(function () {
             if (!isVisible || !initialized || !iframeReady) return;
-            sendToIframe({ cmd: 'resize' });
+            if (!bridgeConfig.lockScreenSize) sendToIframe({ cmd: 'resize' });
             sendToIframe({ cmd: 'refit' });
             focusTerminal();
             restoreTimer = setTimeout(function () {
                 if (!isVisible || !iframeReady) return;
-                sendToIframe({ cmd: 'resize' });
+                if (!bridgeConfig.lockScreenSize) sendToIframe({ cmd: 'resize' });
                 sendToIframe({ cmd: 'refit' });
                 focusTerminal();
             }, 180);
@@ -108,22 +193,25 @@
             case 'loaded':
                 /* iframe HTML loaded — send init config (bypasses queue).
                    cols/rows are calculated by the iframe itself. */
-                iframe.contentWindow.postMessage({
-                    cmd: 'init',
-                    config: {
-                        ftelnetUrl: cfg.ftelnetUrl,
-                        ftelnetSplash: cfg.ftelnetSplash,
-                        hostname: cfg.hostname,
-                        wsp: cfg.wsp,
-                        wssp: cfg.wssp,
-                        telnetPort: cfg.telnetPort,
-                        rloginPort: cfg.rloginPort,
-                        isLoggedIn: cfg.isLoggedIn,
-                        userAlias: cfg.userAlias,
-                        userPassword: cfg.userPassword,
-                        isSecure: isSecure
-                    }
-                }, location.origin);
+                bridgeConfigPromise.then(function () {
+                    iframe.contentWindow.postMessage({
+                        cmd: 'init',
+                        config: {
+                            ftelnetUrl: cfg.ftelnetUrl,
+                            ftelnetSplash: cfg.ftelnetSplash,
+                            hostname: cfg.hostname,
+                            wsp: cfg.wsp,
+                            wssp: cfg.wssp,
+                            telnetPort: cfg.telnetPort,
+                            rloginPort: cfg.rloginPort,
+                            isLoggedIn: cfg.isLoggedIn,
+                            userAlias: cfg.userAlias,
+                            userPassword: cfg.userPassword,
+                            isSecure: isSecure,
+                            bridgeOptions: bridgeConfig
+                        }
+                    }, location.origin);
+                });
                 break;
 
             case 'ready':
@@ -177,7 +265,11 @@
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(function () {
             if (!initialized || !iframeReady) return;
-            sendToIframe({ cmd: 'resize' });
+            if (bridgeConfig.lockScreenSize) {
+                sendToIframe({ cmd: 'refit' });
+            } else {
+                sendToIframe({ cmd: 'resize' });
+            }
         }, 250);
     }
 

@@ -4679,9 +4679,9 @@ namespace ZZT {
     SidebarClearLine(0);
     SidebarClearLine(1);
     SidebarClearLine(2);
-    VideoWriteText(61, 0, 0x1f, "    - - - - -      ");
+    VideoWriteText(61, 0, 0x1f, "    - - - - -     ");
     VideoWriteText(62, 1, 0x70, "      ZZT      ");
-    VideoWriteText(61, 2, 0x1f, "    - - - - -      ");
+    VideoWriteText(61, 2, 0x1f, "    - - - - -     ");
 
     if (GameStateElement === E_PLAYER) {
       VideoWriteText(64, 7, 0x1e, " Health:");

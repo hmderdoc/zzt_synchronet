@@ -23,6 +23,8 @@ In this context, it means:
 - `files/root/js/terminal.js`
 - `files/root/js/flweb.js`
 - `files/root/api/flweb-assets.ssjs`
+- `files/root/api/terminal-ui-config.ssjs`
+- `files/root/terminal-ui.ini`
 - `install-web-bridge.sh`
 
 ## Install
@@ -47,6 +49,8 @@ cd /sbbs/xtrn/zzt/web
 - `<target>/root/js/terminal.js`
 - `<target>/root/js/flweb.js`
 - `<target>/root/api/flweb-assets.ssjs`
+- `<target>/root/api/terminal-ui-config.ssjs`
+- `<target>/root/terminal-ui.ini`
 
 The installer backs up any existing files before overwriting them.
 
@@ -108,13 +112,32 @@ Copy from this pack:
 - `files/root/js/terminal.js` -> `<target>/root/js/terminal.js`
 - `files/root/js/flweb.js` -> `<target>/root/js/flweb.js`
 - `files/root/api/flweb-assets.ssjs` -> `<target>/root/api/flweb-assets.ssjs`
+- `files/root/api/terminal-ui-config.ssjs` -> `<target>/root/api/terminal-ui-config.ssjs`
+- `files/root/terminal-ui.ini` -> `<target>/root/terminal-ui.ini`
 
 ## Config Checklist
 
 - `modopts.ini` (`[web]`) has `ftelnet=true` (this is the default).
+- `modopts.ini` (`[web]`) points to your active web root (example: `web_directory=../webv4`).
 - WebSocket service (WS/WSS) is enabled in `services.ini`.
 - `root/api/flweb-assets.ssjs` is present and executable.
+- `root/api/terminal-ui-config.ssjs` and `root/terminal-ui.ini` are present.
 - Browser audio requires at least one user interaction (normal autoplay policy).
+
+## Terminal Policy Toggles (`terminal-ui.ini`)
+
+`root/terminal-ui.ini` lets sysops set terminal behavior without editing JS:
+
+- Fixed or auto-fit size:
+  - `lock_screen_size=true/false`
+  - `columns`, `rows`
+  - `min_columns`, `max_columns`, `min_rows`, `max_rows`
+- Optional features:
+  - `enable_touch_handlers`
+  - `enable_mouse_wheel_arrows`
+  - `enable_render_speed_patch`
+  - `enable_parent_audio_unlock_bridge`
+  - `enable_canvas_scale`
 
 ## Verification
 

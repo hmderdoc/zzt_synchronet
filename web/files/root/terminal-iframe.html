@@ -57,6 +57,21 @@
     var tapFallbackTimer = null;
     var terminalUiBuffer = '';
     var parentAudioUnlockBound = false;
+    var BRIDGE_OPTIONS_DEFAULTS = {
+        lockScreenSize: false,
+        columns: 80,
+        rows: 25,
+        minColumns: 80,
+        maxColumns: 160,
+        minRows: 24,
+        maxRows: 60,
+        enableTouchHandlers: true,
+        enableWheelArrows: true,
+        enableRenderSpeedPatch: true,
+        enableParentAudioUnlockBridge: true,
+        enableCanvasScale: true
+    };
+    var BRIDGE_OPTIONS = normalizeBridgeOptions(BRIDGE_OPTIONS_DEFAULTS);
 
     /* fTelnet CP437 bitmap font sizes (exact PNGs, sorted largest-first).
        Same order as fTelnet's GetBestFit — this IS the contract. */
@@ -71,9 +86,79 @@
         { w:  7, h: 12 },
         { w:  6, h:  8 }
     ];
-    var MIN_COLS = 80, MIN_ROWS = 24, MAX_COLS = 160, MAX_ROWS = 60;
+    var MIN_COLS = BRIDGE_OPTIONS.minColumns;
+    var MIN_ROWS = BRIDGE_OPTIONS.minRows;
+    var MAX_COLS = BRIDGE_OPTIONS.maxColumns;
+    var MAX_ROWS = BRIDGE_OPTIONS.maxRows;
+
+    function toInt(value, fallback, min, max) {
+        var parsed = parseInt(value, 10);
+        if (!isFinite(parsed) || isNaN(parsed)) parsed = fallback;
+        if (isFinite(min) && parsed < min) parsed = min;
+        if (isFinite(max) && parsed > max) parsed = max;
+        return parsed;
+    }
+
+    function toBool(value, fallback) {
+        if (value === true || value === false) return value;
+        if (typeof value === 'number') return value !== 0;
+        if (typeof value === 'string') {
+            var lowered = value.toLowerCase();
+            if (lowered === '1' || lowered === 'true' || lowered === 'yes' || lowered === 'on')
+                return true;
+            if (lowered === '0' || lowered === 'false' || lowered === 'no' || lowered === 'off')
+                return false;
+        }
+        return fallback;
+    }
+
+    function normalizeBridgeOptions(raw) {
+        var src = raw || {};
+        var out = {};
+        out.lockScreenSize = toBool(src.lockScreenSize, BRIDGE_OPTIONS_DEFAULTS.lockScreenSize);
+        out.columns = toInt(src.columns, BRIDGE_OPTIONS_DEFAULTS.columns, 40, 240);
+        out.rows = toInt(src.rows, BRIDGE_OPTIONS_DEFAULTS.rows, 15, 120);
+        out.minColumns = toInt(src.minColumns, BRIDGE_OPTIONS_DEFAULTS.minColumns, 40, 240);
+        out.maxColumns = toInt(src.maxColumns, BRIDGE_OPTIONS_DEFAULTS.maxColumns, 40, 240);
+        out.minRows = toInt(src.minRows, BRIDGE_OPTIONS_DEFAULTS.minRows, 15, 120);
+        out.maxRows = toInt(src.maxRows, BRIDGE_OPTIONS_DEFAULTS.maxRows, 15, 120);
+        out.enableTouchHandlers = toBool(src.enableTouchHandlers, BRIDGE_OPTIONS_DEFAULTS.enableTouchHandlers);
+        out.enableWheelArrows = toBool(src.enableWheelArrows, BRIDGE_OPTIONS_DEFAULTS.enableWheelArrows);
+        out.enableRenderSpeedPatch = toBool(src.enableRenderSpeedPatch, BRIDGE_OPTIONS_DEFAULTS.enableRenderSpeedPatch);
+        out.enableParentAudioUnlockBridge = toBool(
+            src.enableParentAudioUnlockBridge,
+            BRIDGE_OPTIONS_DEFAULTS.enableParentAudioUnlockBridge
+        );
+        out.enableCanvasScale = toBool(src.enableCanvasScale, BRIDGE_OPTIONS_DEFAULTS.enableCanvasScale);
+
+        if (out.minColumns > out.maxColumns) out.minColumns = out.maxColumns;
+        if (out.minRows > out.maxRows) out.minRows = out.maxRows;
+        if (out.columns < out.minColumns) out.columns = out.minColumns;
+        if (out.columns > out.maxColumns) out.columns = out.maxColumns;
+        if (out.rows < out.minRows) out.rows = out.minRows;
+        if (out.rows > out.maxRows) out.rows = out.maxRows;
+        return out;
+    }
+
+    function applyBridgeOptions(raw) {
+        BRIDGE_OPTIONS = normalizeBridgeOptions(raw || BRIDGE_OPTIONS_DEFAULTS);
+        MIN_COLS = BRIDGE_OPTIONS.minColumns;
+        MIN_ROWS = BRIDGE_OPTIONS.minRows;
+        MAX_COLS = BRIDGE_OPTIONS.maxColumns;
+        MAX_ROWS = BRIDGE_OPTIONS.maxRows;
+    }
 
     function getScreenSize() {
+        if (BRIDGE_OPTIONS.lockScreenSize) {
+            return {
+                columns: BRIDGE_OPTIONS.columns,
+                rows: BRIDGE_OPTIONS.rows,
+                scale: 1,
+                fontW: 8,
+                fontH: 16
+            };
+        }
+
         var container = document.getElementById('fTelnetContainer');
         var rect = container ? container.getBoundingClientRect() : null;
         var W = rect && rect.width ? rect.width : window.innerWidth;
@@ -684,9 +769,14 @@
             if (e.deltaY > 0) sendArrowKey('down');
             else if (e.deltaY < 0) sendArrowKey('up');
         };
-        container.addEventListener('wheel', wheelHandler, { passive: true });
+        if (BRIDGE_OPTIONS.enableWheelArrows) {
+            container.addEventListener('wheel', wheelHandler, { passive: true });
+        }
 
         container.style.touchAction = 'manipulation';
+        if (!BRIDGE_OPTIONS.enableTouchHandlers) {
+            return;
+        }
 
         var startX = 0, startY = 0, startTime = 0;
         var trackingTouch = false, tapEligible = false;
@@ -780,6 +870,15 @@
             repositionMobileControls();
             return;
         }
+        if (!BRIDGE_OPTIONS.enableCanvasScale || BRIDGE_OPTIONS.lockScreenSize) {
+            canvas.style.transform = '';
+            canvas.style.transformOrigin = '';
+            canvas.style.width = '';
+            canvas.style.height = '';
+            canvas.style.marginLeft = '0';
+            repositionMobileControls();
+            return;
+        }
         /* Always clear any CSS transform — we scale via CSS width/height
            so that offsetX/offsetY and getBoundingClientRect() stay in the
            same coordinate space.  CSS transform:scale() breaks fTelnet's
@@ -826,13 +925,17 @@
 
 
     installTerminalUiSocketBridge();
-    installParentAudioUnlockBridge();
 
     function initTerminal(cfg) {
         if (typeof fTelnetOptions === 'undefined' ||
             typeof fTelnetClient === 'undefined') {
             setTimeout(function () { initTerminal(cfg); }, 200);
             return;
+        }
+
+        applyBridgeOptions(cfg && cfg.bridgeOptions ? cfg.bridgeOptions : BRIDGE_OPTIONS_DEFAULTS);
+        if (BRIDGE_OPTIONS.enableParentAudioUnlockBridge) {
+            installParentAudioUnlockBridge();
         }
 
         var isSecure = cfg.isSecure;
@@ -885,6 +988,7 @@
         window._ftClient = client;
         installTerminalUiBridge();
 
+        if (BRIDGE_OPTIONS.enableRenderSpeedPatch) {
         /* ── Render-speed fix v3 ────────────────────────────────────
          *  fTelnet has a BPS rate limiter in OnConnectionData that reads
          *  only a few hundred bytes per call and re-schedules via
@@ -1176,6 +1280,7 @@
             }, 50);
 
         })(client);
+        }
 
         if (client.OnConnectionConnect) {
             var origConnect = client.OnConnectionConnect;
@@ -1309,19 +1414,21 @@
                         ? client._Crt.Font.Name : 'CP437');
                 }
                 scrollToBottom();
-                var newSize = getScreenSize();
-                currentSize = newSize;
-                if (isConnected &&
-                    (newSize.columns !== currentColumns ||
-                     newSize.rows !== currentRows)) {
-                    currentColumns = newSize.columns;
-                    currentRows = newSize.rows;
-                    if (typeof client._Crt.SetScreenSize === 'function') {
-                        client._Crt.SetScreenSize(currentColumns, currentRows);
-                    }
-                    if (typeof client._Crt.SetFont === 'function') {
-                        client._Crt.SetFont(client._Crt.Font
-                            ? client._Crt.Font.Name : 'CP437');
+                if (!BRIDGE_OPTIONS.lockScreenSize) {
+                    var newSize = getScreenSize();
+                    currentSize = newSize;
+                    if (isConnected &&
+                        (newSize.columns !== currentColumns ||
+                         newSize.rows !== currentRows)) {
+                        currentColumns = newSize.columns;
+                        currentRows = newSize.rows;
+                        if (typeof client._Crt.SetScreenSize === 'function') {
+                            client._Crt.SetScreenSize(currentColumns, currentRows);
+                        }
+                        if (typeof client._Crt.SetFont === 'function') {
+                            client._Crt.SetFont(client._Crt.Font
+                                ? client._Crt.Font.Name : 'CP437');
+                        }
                     }
                 }
                 scrollToBottom();
