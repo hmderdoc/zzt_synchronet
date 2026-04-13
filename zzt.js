@@ -3575,8 +3575,10 @@ var ZZT;
         if (ZZT.AnsiMusicMode !== "AUTO") {
             return false;
         }
+        // Synchronet reports CTerm version as (major*1000)+minor for detected
+        // CTerm/SyncTERM sessions; non-CTerm sessions are 0/negative/undefined.
         ctermVersion = (typeof console.cterm_version === "number" ? console.cterm_version : -1);
-        return ctermVersion >= 0;
+        return ctermVersion >= 1000;
     }
     function ansiMusicLengthFromDuration(durationCode) {
         var denom;
