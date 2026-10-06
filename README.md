@@ -90,7 +90,7 @@ Classic world `.HI` files are still read as fallback and written as compatibilit
 
 ### Optional `ZZT.INI` Overrides
 
-Create `/sbbs/xtrn/zzt/ZZT.INI` (or `zzt.ini`) to override defaults:
+Edit `/sbbs/xtrn/zzt/zzt.ini` (or use `ZZT.INI`) to override defaults:
 
 ```ini
 HIGH_SCORE_JSON=/path/to/shared/highscores.json
